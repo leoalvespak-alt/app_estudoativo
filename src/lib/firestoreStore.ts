@@ -4,17 +4,21 @@ import {
   doc,
   getDoc,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
+  where,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import type {
+  ComparativeTableEntry,
+  ComparativeTableRow,
+  ErrorCause,
   QuestionEvaluation,
+  SurgicalFocusInfo,
   TrainerQuestion,
   TrainingSession,
   UserProfile,
@@ -122,6 +126,10 @@ export async function getUserProfile(usernameKey: string): Promise<UserProfile |
       displayName: String(data.displayName || usernameKey),
       createdAt: toIsoString(data.createdAt),
       lastActiveAt: toIsoString(data.lastActiveAt),
+      onboardingCompleted: data.onboardingCompleted === true,
+      onboardingCompletedAt: data.onboardingCompletedAt
+        ? toIsoString(data.onboardingCompletedAt)
+        : undefined,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
@@ -146,6 +154,7 @@ export async function createUserProfile(
       displayName: cleanDisplay.length >= 3 ? cleanDisplay : usernameKey,
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
+      onboardingCompleted: false,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -168,6 +177,21 @@ export async function touchUserProfile(
   }
 }
 
+export async function markUserOnboardingCompleted(
+  usernameKey: string
+): Promise<void> {
+  const path = `users/${usernameKey}`;
+  try {
+    await updateDoc(doc(db, 'users', usernameKey), {
+      onboardingCompleted: true,
+      onboardingCompletedAt: serverTimestamp(),
+      lastActiveAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 export function subscribeUserSessions(
   usernameKey: string,
   onSessions: (sessions: TrainingSession[]) => void,
@@ -176,43 +200,48 @@ export function subscribeUserSessions(
   const path = `users/${usernameKey}/sessions`;
   const q = query(
     collection(db, 'users', usernameKey, 'sessions'),
-    orderBy('updatedAt', 'desc')
+    where('ownerUsername', '==', usernameKey)
   );
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const list: TrainingSession[] = snapshot.docs.map((docSnap) => {
-        const d = docSnap.data();
-        return {
-          id: String(d.id || docSnap.id),
-          ownerUsername: String(d.ownerUsername || usernameKey),
-          title: String(d.title || 'Treino'),
-          discipline: typeof d.discipline === 'string' ? d.discipline : undefined,
-          sourceType:
-            d.sourceType === 'text'
+      const list: TrainingSession[] = snapshot.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            id: String(d.id || docSnap.id),
+            ownerUsername: String(d.ownerUsername || usernameKey),
+            title: String(d.title || 'Treino'),
+            discipline: typeof d.discipline === 'string' ? d.discipline : undefined,
+            sourceType: (d.sourceType === 'text'
               ? 'text'
               : d.sourceType === 'git_kb'
                 ? 'git_kb'
                 : d.sourceType === 'weak_points'
                   ? 'weak_points'
-                  : 'topic',
-          sourceContent: String(d.sourceContent || ''),
-          selectedKbPaths: Array.isArray(d.selectedKbPaths) ? d.selectedKbPaths : [],
-          kbSources: Array.isArray(d.kbSources) ? d.kbSources : [],
-          status: d.status || 'in_progress',
-          wantsPrepClass: Boolean(d.wantsPrepClass),
-          currentRound: Number(d.currentRound || 1),
-          syllabus: Array.isArray(d.syllabus) ? d.syllabus : [],
-          prepClass: d.prepClass ?? null,
-          rounds: Array.isArray(d.rounds) ? d.rounds : [],
-          activeWeakPoints: Array.isArray(d.activeWeakPoints) ? d.activeWeakPoints : [],
-          strategicSyntheses: Array.isArray(d.strategicSyntheses) ? d.strategicSyntheses : [],
-          finalSynthesis: d.finalSynthesis ?? null,
-          createdAt: toIsoString(d.createdAt),
-          updatedAt: toIsoString(d.updatedAt),
-        };
-      });
+                  : 'topic') as TrainingSession['sourceType'],
+            sourceContent: String(d.sourceContent || ''),
+            selectedKbPaths: Array.isArray(d.selectedKbPaths) ? d.selectedKbPaths : [],
+            kbSources: Array.isArray(d.kbSources) ? d.kbSources : [],
+            status: d.status || 'in_progress',
+            wantsPrepClass: Boolean(d.wantsPrepClass),
+            currentRound: Number(d.currentRound || 1),
+            syllabus: Array.isArray(d.syllabus) ? d.syllabus : [],
+            prepClass: d.prepClass ?? null,
+            rounds: Array.isArray(d.rounds) ? d.rounds : [],
+            activeWeakPoints: Array.isArray(d.activeWeakPoints) ? d.activeWeakPoints : [],
+            strategicSyntheses: Array.isArray(d.strategicSyntheses) ? d.strategicSyntheses : [],
+            finalSynthesis: d.finalSynthesis ?? null,
+            surgicalFocus:
+              d.surgicalFocus && typeof d.surgicalFocus === 'object'
+                ? (d.surgicalFocus as SurgicalFocusInfo)
+                : null,
+            createdAt: toIsoString(d.createdAt),
+            updatedAt: toIsoString(d.updatedAt),
+          };
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       onSessions(list);
     },
     (error) => {
@@ -250,6 +279,7 @@ export async function createCloudSession(
     activeWeakPoints: session.activeWeakPoints.slice(0, 100),
     strategicSyntheses: session.strategicSyntheses.slice(0, 5),
     finalSynthesis: session.finalSynthesis ?? null,
+    surgicalFocus: session.surgicalFocus ?? undefined,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -309,37 +339,49 @@ export function subscribeUserWeakPoints(
   const path = `users/${usernameKey}/weakPoints`;
   const q = query(
     collection(db, 'users', usernameKey, 'weakPoints'),
-    orderBy('updatedAt', 'desc')
+    where('ownerUsername', '==', usernameKey)
   );
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const list: WeakPointBankEntry[] = snapshot.docs.map((docSnap) => {
-        const d = docSnap.data();
-        return {
-          id: String(d.id || docSnap.id),
-          ownerUsername: String(d.ownerUsername || usernameKey),
-          discipline: String(d.discipline || 'Conhecimentos Gerais'),
-          concept: String(d.concept || ''),
-          definition: String(d.definition || ''),
-          subtopic: String(d.subtopic || ''),
-          sourceSessionId: String(d.sourceSessionId || ''),
-          sourceSessionTitle: String(d.sourceSessionTitle || 'Treino'),
-          status: d.status === 'mastered' ? 'mastered' : 'active',
-          lastTrigger:
-            d.lastTrigger === 'partial' ||
+      const list: WeakPointBankEntry[] = snapshot.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            id: String(d.id || docSnap.id),
+            ownerUsername: String(d.ownerUsername || usernameKey),
+            discipline: String(d.discipline || 'Conhecimentos Gerais'),
+            concept: String(d.concept || ''),
+            definition: String(d.definition || ''),
+            subtopic: String(d.subtopic || ''),
+            sourceSessionId: String(d.sourceSessionId || ''),
+            sourceSessionTitle: String(d.sourceSessionTitle || 'Treino'),
+            status: (d.status === 'mastered' ? 'mastered' : 'active') as 'active' | 'mastered',
+            lastTrigger: (d.lastTrigger === 'partial' ||
             d.lastTrigger === 'lucky_guess' ||
             d.lastTrigger === 'unsure_hit'
               ? d.lastTrigger
-              : 'incorrect',
-          errorCount: Number(d.errorCount || 0),
-          guessCount: Number(d.guessCount || 0),
-          retestSuccessCount: Number(d.retestSuccessCount || 0),
-          createdAt: toIsoString(d.createdAt),
-          updatedAt: toIsoString(d.updatedAt),
-        };
-      });
+              : 'incorrect') as WeakPointTrigger,
+            errorCount: Number(d.errorCount || 0),
+            guessCount: Number(d.guessCount || 0),
+            retestSuccessCount: Number(d.retestSuccessCount || 0),
+            lastErrorCause:
+              d.lastErrorCause === 'lack_of_theory' ||
+              d.lastErrorCause === 'rushed_reading' ||
+              d.lastErrorCause === 'concept_confusion' ||
+              d.lastErrorCause === 'detail_slip'
+                ? (d.lastErrorCause as ErrorCause)
+                : undefined,
+            errorCauseCounts:
+              d.errorCauseCounts && typeof d.errorCauseCounts === 'object'
+                ? (d.errorCauseCounts as Partial<Record<ErrorCause, number>>)
+                : undefined,
+            createdAt: toIsoString(d.createdAt),
+            updatedAt: toIsoString(d.updatedAt),
+          };
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       onEntries(list);
     },
     (error) => {
@@ -415,7 +457,7 @@ export async function syncRoundWeakPointsToBank(params: {
             definition: (ev.conceptDefinition || existing.definition || '').slice(0, 2000),
             subtopic: (question.subtopic || existing.subtopic || '').slice(0, 240),
             sourceSessionId: session.id,
-            sourceSessionTitle: session.title.slice(0, 160),
+            sourceSessionTitle: (session.title || 'Treino').slice(0, 160),
             status: 'active',
             lastTrigger: trigger,
             errorCount: nextErrorCount,
@@ -436,7 +478,7 @@ export async function syncRoundWeakPointsToBank(params: {
             definition: (ev.conceptDefinition || '').slice(0, 2000),
             subtopic: (question.subtopic || '').slice(0, 240),
             sourceSessionId: session.id,
-            sourceSessionTitle: session.title.slice(0, 160),
+            sourceSessionTitle: (session.title || 'Treino').slice(0, 160),
             status: 'active',
             lastTrigger: trigger,
             errorCount: nextErrorCount,
@@ -491,6 +533,140 @@ export async function deleteWeakPointBankEntry(
   const path = `users/${usernameKey}/weakPoints/${weakPointId}`;
   try {
     await deleteDoc(doc(db, 'users', usernameKey, 'weakPoints', weakPointId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function updateWeakPointErrorCause(params: {
+  usernameKey: string;
+  weakPointId: string;
+  cause: ErrorCause;
+  previousCause?: ErrorCause | '';
+  existingCounts?: Partial<Record<ErrorCause, number>>;
+}): Promise<void> {
+  const { usernameKey, weakPointId, cause, previousCause, existingCounts } = params;
+  const path = `users/${usernameKey}/weakPoints/${weakPointId}`;
+  const nextCounts: Partial<Record<ErrorCause, number>> = { ...(existingCounts || {}) };
+  if (previousCause && previousCause !== cause && (nextCounts[previousCause] || 0) > 0) {
+    nextCounts[previousCause] = Math.max(0, (nextCounts[previousCause] || 0) - 1);
+  }
+  if (previousCause !== cause) {
+    nextCounts[cause] = (nextCounts[cause] || 0) + 1;
+  }
+
+  try {
+    await updateDoc(doc(db, 'users', usernameKey, 'weakPoints', weakPointId), {
+      lastErrorCause: cause,
+      errorCauseCounts: nextCounts,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export function subscribeUserComparativeTables(
+  usernameKey: string,
+  onTables: (tables: ComparativeTableEntry[]) => void,
+  onError: (message: string) => void
+): Unsubscribe {
+  const path = `users/${usernameKey}/comparativeTables`;
+  const q = query(
+    collection(db, 'users', usernameKey, 'comparativeTables'),
+    where('ownerUsername', '==', usernameKey)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: ComparativeTableEntry[] = snapshot.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          const rawRows = Array.isArray(d.rows) ? d.rows : [];
+          const rows: ComparativeTableRow[] = rawRows
+            .filter((r) => r && typeof r === 'object')
+            .map((r) => ({
+              criterion: String((r as Record<string, unknown>).criterion || ''),
+              conceptAValue: String((r as Record<string, unknown>).conceptAValue || ''),
+              conceptBValue: String((r as Record<string, unknown>).conceptBValue || ''),
+              examDecisiveDiff: String((r as Record<string, unknown>).examDecisiveDiff || ''),
+            }));
+
+          return {
+            id: String(d.id || docSnap.id),
+            ownerUsername: String(d.ownerUsername || usernameKey),
+            discipline: String(d.discipline || 'Conhecimentos Gerais'),
+            title: String(d.title || 'Quadro Comparativo'),
+            conceptA: String(d.conceptA || ''),
+            conceptB: String(d.conceptB || ''),
+            triggerReason: (d.triggerReason === 'auto_confusion'
+              ? 'auto_confusion'
+              : 'on_demand') as ComparativeTableEntry['triggerReason'],
+            rows,
+            summaryTip: typeof d.summaryTip === 'string' ? d.summaryTip : undefined,
+            sourceSessionId:
+              typeof d.sourceSessionId === 'string' ? d.sourceSessionId : undefined,
+            createdAt: toIsoString(d.createdAt),
+            updatedAt: toIsoString(d.updatedAt),
+          };
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      onTables(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(
+          wrapped instanceof Error
+            ? wrapped.message
+            : 'Erro ao sincronizar quadros comparativos.'
+        );
+      }
+    }
+  );
+}
+
+export async function createCloudComparativeTable(
+  usernameKey: string,
+  table: ComparativeTableEntry
+): Promise<void> {
+  const path = `users/${usernameKey}/comparativeTables/${table.id}`;
+  const payload = stripUndefined({
+    id: table.id,
+    ownerUsername: usernameKey,
+    discipline: table.discipline.slice(0, 100) || 'Conhecimentos Gerais',
+    title: table.title.slice(0, 160),
+    conceptA: table.conceptA.slice(0, 160),
+    conceptB: table.conceptB.slice(0, 160),
+    triggerReason: table.triggerReason,
+    rows: table.rows.slice(0, 15).map((r) => ({
+      criterion: String(r.criterion || '').slice(0, 240),
+      conceptAValue: String(r.conceptAValue || '').slice(0, 800),
+      conceptBValue: String(r.conceptBValue || '').slice(0, 800),
+      examDecisiveDiff: String(r.examDecisiveDiff || '').slice(0, 800),
+    })),
+    summaryTip: table.summaryTip ? table.summaryTip.slice(0, 1000) : undefined,
+    sourceSessionId: table.sourceSessionId ? table.sourceSessionId.slice(0, 128) : undefined,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await setDoc(doc(db, 'users', usernameKey, 'comparativeTables', table.id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteCloudComparativeTable(
+  usernameKey: string,
+  tableId: string
+): Promise<void> {
+  const path = `users/${usernameKey}/comparativeTables/${tableId}`;
+  try {
+    await deleteDoc(doc(db, 'users', usernameKey, 'comparativeTables', tableId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

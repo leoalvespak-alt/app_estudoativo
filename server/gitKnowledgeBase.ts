@@ -57,7 +57,9 @@ const STATIC_LEIS_SECAS: KbMaterialItem[] = [
 ];
 
 let cachedCatalog: { items: KbMaterialItem[]; fetchedAt: number } | null = null;
+let inflightCatalogPromise: Promise<KbMaterialItem[]> | null = null;
 const docCache = new Map<string, { text: string; fetchedAt: number }>();
+const inflightDocPromises = new Map<string, Promise<string>>();
 
 const STOPWORDS = new Set([
   'a', 'o', 'os', 'as', 'um', 'uma', 'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na',
@@ -110,30 +112,43 @@ export async function getKbCatalog(forceRefresh = false): Promise<KbMaterialItem
     return cachedCatalog.items;
   }
 
-  const res = await fetch(`${RAW_BASE}/_md_normalizado/materials-manifest.json`, {
-    headers: { 'User-Agent': 'aistudio-build' },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Falha ao carregar o manifesto do GitHub (${res.status}).`);
+  if (!forceRefresh && inflightCatalogPromise) {
+    return inflightCatalogPromise;
   }
 
-  const json = (await res.json()) as { materials?: ManifestRawItem[] };
-  const mdItems: KbMaterialItem[] = (json.materials || []).map((m) => ({
-    materialKey: m.material_key,
-    sourceKey: m.source_key,
-    sourceLabel: m.source_label,
-    materialType: m.material_type,
-    discipline: m.discipline,
-    title: m.title,
-    relativePath: m.relative_path,
-    rawPath: `_md_normalizado/${m.relative_path}`,
-    sizeBytes: m.size_bytes,
-  }));
+  inflightCatalogPromise = (async () => {
+    try {
+      const res = await fetch(`${RAW_BASE}/_md_normalizado/materials-manifest.json`, {
+        headers: { 'User-Agent': 'aistudio-build' },
+      });
 
-  const items = [...mdItems, ...STATIC_LEIS_SECAS];
-  cachedCatalog = { items, fetchedAt: Date.now() };
-  return items;
+      if (!res.ok) {
+        if (cachedCatalog) return cachedCatalog.items;
+        throw new Error(`Não foi possível carregar o catálogo da base de estudos (${res.status}).`);
+      }
+
+      const json = (await res.json()) as { materials?: ManifestRawItem[] };
+      const mdItems: KbMaterialItem[] = (json.materials || []).map((m) => ({
+        materialKey: m.material_key,
+        sourceKey: m.source_key,
+        sourceLabel: m.source_label,
+        materialType: m.material_type,
+        discipline: m.discipline,
+        title: m.title,
+        relativePath: m.relative_path,
+        rawPath: `_md_normalizado/${m.relative_path}`,
+        sizeBytes: m.size_bytes,
+      }));
+
+      const items = [...mdItems, ...STATIC_LEIS_SECAS];
+      cachedCatalog = { items, fetchedAt: Date.now() };
+      return items;
+    } finally {
+      inflightCatalogPromise = null;
+    }
+  })();
+
+  return inflightCatalogPromise;
 }
 
 export async function fetchKbDocumentText(rawPath: string): Promise<string> {
@@ -142,28 +157,42 @@ export async function fetchKbDocumentText(rawPath: string): Promise<string> {
     return cached.text;
   }
 
-  const encoded = encodeGitPath(rawPath);
-  const res = await fetch(`${RAW_BASE}/${encoded}`, {
-    headers: { 'User-Agent': 'aistudio-build' },
-  });
-  if (!res.ok) {
-    throw new Error(`Não foi possível baixar o arquivo "${rawPath}" do GitHub (${res.status}).`);
+  const inflight = inflightDocPromises.get(rawPath);
+  if (inflight) {
+    return inflight;
   }
 
-  const buffer = await res.arrayBuffer();
-  let rawText = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
-  if (
-    rawText.includes('\uFFFD') ||
-    /charset\s*=\s*["']?(windows-1252|iso-8859-1)/i.test(rawText.slice(0, 2000))
-  ) {
-    rawText = new TextDecoder('windows-1252').decode(buffer);
-  }
-  const cleanText = rawPath.toLowerCase().endsWith('.html')
-    ? stripHtmlToText(rawText)
-    : rawText.trim();
+  const promise = (async () => {
+    try {
+      const encoded = encodeGitPath(rawPath);
+      const res = await fetch(`${RAW_BASE}/${encoded}`, {
+        headers: { 'User-Agent': 'aistudio-build' },
+      });
+      if (!res.ok) {
+        throw new Error(`Não foi possível abrir o material "${rawPath}" (${res.status}).`);
+      }
 
-  docCache.set(rawPath, { text: cleanText, fetchedAt: Date.now() });
-  return cleanText;
+      const buffer = await res.arrayBuffer();
+      let rawText = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+      if (
+        rawText.includes('\uFFFD') ||
+        /charset\s*=\s*["']?(windows-1252|iso-8859-1)/i.test(rawText.slice(0, 2000))
+      ) {
+        rawText = new TextDecoder('windows-1252').decode(buffer);
+      }
+      const cleanText = rawPath.toLowerCase().endsWith('.html')
+        ? stripHtmlToText(rawText)
+        : rawText.trim();
+
+      docCache.set(rawPath, { text: cleanText, fetchedAt: Date.now() });
+      return cleanText;
+    } finally {
+      inflightDocPromises.delete(rawPath);
+    }
+  })();
+
+  inflightDocPromises.set(rawPath, promise);
+  return promise;
 }
 
 function extractRelevantExcerpt(

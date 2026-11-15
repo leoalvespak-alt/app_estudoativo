@@ -27,6 +27,15 @@
           "type": "string",
           "format": "date-time",
           "description": "Timestamp do servidor do ultimo acesso."
+        },
+        "onboardingCompleted": {
+          "type": "boolean",
+          "description": "Indica se o usuario ja visualizou o guia inicial do metodo e concluiu ou pulou o tour."
+        },
+        "onboardingCompletedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp do servidor quando o onboarding foi concluido."
         }
       },
       "required": ["usernameKey", "displayName", "createdAt", "lastActiveAt"]
@@ -99,6 +108,9 @@
           "type": "array"
         },
         "finalSynthesis": {
+          "type": "object"
+        },
+        "surgicalFocus": {
           "type": "object"
         },
         "createdAt": {
@@ -189,6 +201,13 @@
         "retestSuccessCount": {
           "type": "integer"
         },
+        "lastErrorCause": {
+          "type": "string",
+          "enum": ["lack_of_theory", "rushed_reading", "concept_confusion", "detail_slip"]
+        },
+        "errorCauseCounts": {
+          "type": "object"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -215,6 +234,80 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ComparativeTable": {
+      "title": "ComparativeTable",
+      "description": "Quadro comparativo entre conceitos parecidos salvo na biblioteca do usuario.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ownerUsername": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9._-]+$"
+        },
+        "discipline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "conceptA": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "conceptB": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "triggerReason": {
+          "type": "string",
+          "enum": ["auto_confusion", "on_demand"]
+        },
+        "rows": {
+          "type": "array"
+        },
+        "summaryTip": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "sourceSessionId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUsername",
+        "discipline",
+        "title",
+        "conceptA",
+        "conceptB",
+        "triggerReason",
+        "rows",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -235,6 +328,12 @@
         "$ref": "#/entities/WeakPointBankEntry"
       },
       "description": "Banco de erros e acertos frageis agrupados por disciplina para reteste sob demanda."
+    },
+    "/users/{usernameKey}/comparativeTables/{tableId}": {
+      "schema": {
+        "$ref": "#/entities/ComparativeTable"
+      },
+      "description": "Quadros comparativos automaticos e sob demanda salvos na biblioteca do usuario."
     }
   }
 }

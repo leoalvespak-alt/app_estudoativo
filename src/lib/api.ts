@@ -1,4 +1,5 @@
 import type {
+  ComparativeTableRow,
   KbMaterialItem,
   KbSourceRef,
   PrepClassContent,
@@ -7,9 +8,37 @@ import type {
   SourceType,
   StrategicSynthesis,
   SyllabusRoundPlan,
+  TheorySummaryContent,
   TrainerQuestion,
   WeakPoint,
 } from '../types/trainer';
+
+const CATALOG_CACHE_TTL_MS = 10 * 60 * 1000;
+const DOC_PREVIEW_CACHE_TTL_MS = 20 * 60 * 1000;
+
+export interface KbCatalogResponse {
+  totalCount: number;
+  disciplines: Array<{ name: string; count: number }>;
+  items: KbMaterialItem[];
+}
+
+export interface KbDocumentPreviewResponse {
+  rawPath: string;
+  excerpt: string;
+  totalLength: number;
+}
+
+const catalogResponseCache = new Map<
+  string,
+  { data: KbCatalogResponse; fetchedAt: number }
+>();
+const inflightCatalogRequests = new Map<string, Promise<KbCatalogResponse>>();
+
+const previewResponseCache = new Map<
+  string,
+  { data: KbDocumentPreviewResponse; fetchedAt: number }
+>();
+const inflightPreviewRequests = new Map<string, Promise<KbDocumentPreviewResponse>>();
 
 async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
   const response = await fetch(url, {
@@ -25,12 +54,6 @@ async function postJson<TResponse>(url: string, body: unknown): Promise<TRespons
   return data;
 }
 
-export interface KbCatalogResponse {
-  totalCount: number;
-  disciplines: Array<{ name: string; count: number }>;
-  items: KbMaterialItem[];
-}
-
 export async function fetchKbCatalog(params?: {
   q?: string;
   discipline?: string;
@@ -39,30 +62,69 @@ export async function fetchKbCatalog(params?: {
   if (params?.q) search.set('q', params.q);
   if (params?.discipline) search.set('discipline', params.discipline);
   const qs = search.toString();
-  const response = await fetch(`/api/kb/catalog${qs ? `?${qs}` : ''}`);
-  const data = (await response.json().catch(() => ({}))) as { error?: string } & KbCatalogResponse;
-  if (!response.ok) {
-    throw new Error(data.error || 'Erro ao carregar catálogo do GitHub.');
+  const cacheKey = qs || '__all__';
+
+  const cached = catalogResponseCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < CATALOG_CACHE_TTL_MS) {
+    return cached.data;
   }
-  return data;
+
+  const inflight = inflightCatalogRequests.get(cacheKey);
+  if (inflight) {
+    return inflight;
+  }
+
+  const requestPromise = (async () => {
+    try {
+      const response = await fetch(`/api/kb/catalog${qs ? `?${qs}` : ''}`);
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & KbCatalogResponse;
+      if (!response.ok) {
+        throw new Error(data.error || 'Não foi possível carregar o catálogo da base de estudos.');
+      }
+      catalogResponseCache.set(cacheKey, { data, fetchedAt: Date.now() });
+      return data;
+    } finally {
+      inflightCatalogRequests.delete(cacheKey);
+    }
+  })();
+
+  inflightCatalogRequests.set(cacheKey, requestPromise);
+  return requestPromise;
 }
 
-export async function fetchKbDocumentPreview(rawPath: string): Promise<{
-  rawPath: string;
-  excerpt: string;
-  totalLength: number;
-}> {
-  const response = await fetch(`/api/kb/document?path=${encodeURIComponent(rawPath)}`);
-  const data = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    rawPath: string;
-    excerpt: string;
-    totalLength: number;
-  };
-  if (!response.ok) {
-    throw new Error(data.error || 'Erro ao carregar prévia do documento.');
+export async function fetchKbDocumentPreview(
+  rawPath: string
+): Promise<KbDocumentPreviewResponse> {
+  const cached = previewResponseCache.get(rawPath);
+  if (cached && Date.now() - cached.fetchedAt < DOC_PREVIEW_CACHE_TTL_MS) {
+    return cached.data;
   }
-  return data;
+
+  const inflight = inflightPreviewRequests.get(rawPath);
+  if (inflight) {
+    return inflight;
+  }
+
+  const requestPromise = (async () => {
+    try {
+      const response = await fetch(`/api/kb/document?path=${encodeURIComponent(rawPath)}`);
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & KbDocumentPreviewResponse;
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao carregar prévia do documento.');
+      }
+      previewResponseCache.set(rawPath, { data, fetchedAt: Date.now() });
+      return data;
+    } finally {
+      inflightPreviewRequests.delete(rawPath);
+    }
+  })();
+
+  inflightPreviewRequests.set(rawPath, requestPromise);
+  return requestPromise;
 }
 
 export interface InitTrainerResult {
@@ -134,4 +196,30 @@ export function finalizeTrainerSession(params: {
   activeWeakPoints: WeakPoint[];
 }): Promise<FinalizeTrainerResult> {
   return postJson<FinalizeTrainerResult>('/api/trainer/finalize', params);
+}
+
+export interface GenerateComparativeTableResult {
+  title: string;
+  conceptA: string;
+  conceptB: string;
+  summaryTip: string;
+  rows: ComparativeTableRow[];
+}
+
+export function generateComparativeTable(params: {
+  discipline: string;
+  conceptA: string;
+  conceptB?: string;
+  contextNotes?: string;
+}): Promise<GenerateComparativeTableResult> {
+  return postJson<GenerateComparativeTableResult>('/api/trainer/comparative-table', params);
+}
+
+export function fetchTheorySummary(params: {
+  discipline?: string;
+  concept: string;
+  subtopic?: string;
+  expectedAnswer?: string;
+}): Promise<TheorySummaryContent> {
+  return postJson<TheorySummaryContent>('/api/trainer/theory-summary', params);
 }

@@ -8,29 +8,51 @@
 }
 
 @layer base {
+  html {
+    overflow-x: clip;
+  }
+
   body {
     font-family: var(--font-sans);
-    background-color: #FAF9F6;
+    background-color: #FAF8F5;
     color: #18181B;
+    overflow-x: clip;
   }
 
   .dark body {
-    background-color: #111110;
-    color: #F4F2ED;
+    background-color: #141312;
+    color: #EFECE6;
   }
 
   h1, h2, .font-display {
     font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.24;
     text-wrap: balance;
   }
 
   code, pre, .font-mono {
     font-family: var(--font-mono);
   }
+
+  :focus-visible {
+    outline: 2px solid #B45309;
+    outline-offset: 2px;
+  }
+
+  .dark :focus-visible {
+    outline-color: #F59E0B;
+  }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.reading-measure {
+  max-width: 68ch;
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
 @media (prefers-reduced-motion: reduce) {

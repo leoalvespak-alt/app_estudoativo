@@ -10,13 +10,16 @@ import {
   retrieveGitKnowledge,
 } from './server/gitKnowledgeBase.ts';
 import type {
+  ComparativeTableRow,
   KbSourceRef,
   PrepClassContent,
   QuestionEvaluation,
+  QuestionFormat,
   RoundRecord,
   SourceType,
   StrategicSynthesis,
   SyllabusRoundPlan,
+  TheorySummaryContent,
   TrainerQuestion,
   WeakPoint,
 } from './src/types/trainer.ts';
@@ -135,20 +138,22 @@ async function fetchWebFallbackNotes(
 const SYSTEM_INSTRUCTION = `Você é o "Treinador Ativo", um tutor especialista em revisão ativa e consolidação de conhecimento para concursos públicos em português brasileiro.
 
 HIERARQUIA DE FONTES DE CONHECIMENTO (OBRIGATÓRIA):
-- 1ª PRIORIDADE (PRIMÁRIA): Os documentos fornecidos da base Git "rota-base-conhecimento-estudos" (materiais confiáveis e direcionados para concursos). Sempre baseie os conteúdos, regras, definições, perguntas, gabaritos e sínteses primariamente nesses documentos quando presentes.
-- 2ª PRIORIDADE (COMPLEMENTAR): Somente no que faltar ou não estiver detalhado nos documentos da base Git, complemente com sua própria base jurídica/técnica e com os dados atualizados de pesquisa web fornecidos, sem contradizer o material primário.
+- 1ª PRIORIDADE (PRIMÁRIA): Os documentos fornecidos da base de estudos organizada (materiais confiáveis e direcionados para concursos). Sempre baseie os conteúdos, regras, definições, perguntas, gabaritos e sínteses primariamente nesses documentos quando presentes.
+- 2ª PRIORIDADE (COMPLEMENTAR): Somente no que faltar ou não estiver detalhado nos materiais primários, complemente com sua própria base jurídica/técnica e com os dados atualizados de pesquisa web fornecidos, sem contradizer o material primário.
 
 REGRAS PEDAGÓGICAS INVIOLÁVEIS:
 1. Escopo em 10 Rodadas: Dimensione todo o assunto para cobrir integralmente os subtópicos até a Rodada 10, com progressão real de dificuldade (Rodada 1 mais acessível e fundacional; Rodadas intermediárias com aplicações e comparações; Rodadas finais com exceções, pegadinhas e detalhes técnicos).
-2. Formato Misto Inteligente (A–E + Abertas): Gere entre 3 e 4 perguntas por rodada, decidindo livremente a proporção entre "multiple_choice" (alternativas A, B, C, D, E) e "open" (resposta direta aberta), buscando equilíbrio (até ~50% de cada tipo conforme a dificuldade da rodada):
-   - PREZE por "multiple_choice" (A, B, C, D, E) em perguntas difíceis, amplas demais, com múltiplas exceções ou comparações complexas onde alternativas plausíveis ajudam a testar discriminação fina.
-   - PREZE por "open" (resposta aberta direta: classificações, totais de valores, cálculos, definições curtas, diferenças diretas) para questões em RETESTE (isRetest = true) ou tópicos objetivamente respondíveis por escrito.
+2. Alternância Pedagógica de Formatos: Em cada rodada (3 a 4 perguntas), alterne os formatos conforme a progressão do aluno:
+   - "multiple_choice": múltipla escolha com 5 alternativas plausíveis (A, B, C, D, E) para discriminação fina e pegadinhas.
+   - "true_false": julgamento objetivo de assertiva (Certo ou Errado, com opções fixas A: "Certo" e B: "Errado") focado em regras secas, prazos, competências e exceções.
+   - "practical_case": mini-caso prático realista e enxuto de aplicação direta da regra; alterne entre resposta discursiva curta (options: []) e múltipla escolha (5 alternativas A–E).
+   - "open": resposta direta aberta curta (options: []) para definições, cálculos ou comparações objetivas.
 3. Cadência Pingue-Pongue: Nunca revele as respostas ou a alternativa correta junto com as perguntas.
-4. Balanceamento de Conteúdo e Persistência nos Erros: Cada rodada deve equilibrar novos tópicos pendentes do plano com o reteste obrigatório de pontos fracos errados em rodadas anteriores. Nunca trave o avanço do conteúdo apenas repetindo erros, e nunca ignore um ponto fraco ativo.
+4. Balanceamento de Conteúdo e Reteste com Novo Cenário: Cada rodada após erro ou chute DEVE retestar a mesma regra/exceção na rodada seguinte junto aos novos tópicos do plano, MAS alterando obrigatoriamente o caso concreto, nomes, números e redação das alternativas para impedir memorização visual.
 5. Regra de Definição Objetiva: Sempre que mencionar termos técnicos, institutos ou conceitos que o aluno possa desconhecer (nas correções, na aula preparatória ou nas sínteses), NUNCA faça apenas uma listagem seca; forneça junto uma definição objetiva e clara do conceito.
 6. Síntese Estratégica (R3, R6, R9): Ao gerar as rodadas 4, 7 ou 10 (logo após concluir R3, R6 ou R9), produza também uma Síntese Estratégica focada no que foi mais dificultoso nas últimas 3 rodadas, acrescentando informações adjacentes e definições objetivas.
-7. Prorrogação (R11+): Em rodadas de prorrogação, gere perguntas curtas e exclusivas para testar e sanar os pontos fracos que permaneceram após a Rodada 10 (preferencialmente abertas, usando A–E apenas se o ponto exigir análise complexa).
-8. Síntese Ultracompacta Final: Deve condensar TUDO o que foi estudado na sessão em formato de árvore hierárquica ASCII/Unicode usando exatamente os caracteres ├─, └─ e │, com raízes principais em CAIXA ALTA, desdobrando regras, exceções e diferenciais lógicos com máxima densidade técnica.
+7. Prorrogação (R11+): Em rodadas de prorrogação, gere perguntas curtas e exclusivas para testar e sanar os pontos fracos que permaneceram após a Rodada 10.
+8. Síntese Final em Árvore Hierárquica: Deve organizar TODO o conteúdo estudado em texto/Markdown estruturado usando exclusivamente conectores Unicode limpos (├──, └──, │) divididos em 4 blocos claros: Tema Central, Subtópicos e Regras Gerais, Exceções/Prazos/Competências e Pontos de Atenção/Pegadinhas das rodadas erradas ou chutadas.
 9. Clareza e Concisão: Evite blocos de texto prolixos e cansativos; seja cirúrgico, didático e direto.`;
 
 const app = express();
@@ -182,6 +187,7 @@ app.get('/api/kb/catalog', async (req, res) => {
       );
     });
 
+    res.setHeader('Cache-Control', 'private, max-age=300');
     res.json({
       totalCount: catalog.length,
       disciplines,
@@ -201,6 +207,7 @@ app.get('/api/kb/document', async (req, res) => {
       return;
     }
     const text = await fetchKbDocumentText(rawPath);
+    res.setHeader('Cache-Control', 'private, max-age=600');
     res.json({
       rawPath,
       excerpt: text.slice(0, 4000),
@@ -224,7 +231,7 @@ app.post('/api/trainer/init', async (req, res) => {
     };
 
     if (!sourceContent?.trim() && (!selectedKbPaths || selectedKbPaths.length === 0)) {
-      res.status(400).json({ error: 'Informe um tema, texto base ou selecione documentos da Base Git.' });
+      res.status(400).json({ error: 'Informe um tema, texto base ou selecione materiais da Base de Estudos.' });
       return;
     }
 
@@ -430,6 +437,28 @@ app.post('/api/trainer/round', async (req, res) => {
     const unresolvedWeakPoints = (activeWeakPoints || []).filter((wp) => !wp.resolved);
     const targetPlan = (syllabus || []).find((s) => s.roundNumber === currentRound);
     const lastThreeRounds = (recentRounds || []).slice(-3);
+    const lastRound = lastThreeRounds[lastThreeRounds.length - 1];
+    const immediateRetestTargets = lastRound
+      ? lastRound.questions
+          .map((q) => {
+            const ev = lastRound.evaluations.find((e) => e.questionId === q.id);
+            if (!ev) return null;
+            const conf = ev.confidenceAtSubmit ?? q.confidence ?? '';
+            const needsRetest =
+              ev.verdict !== 'correct' || Boolean(ev.isLuckyGuess) || conf === 'guess';
+            if (!needsRetest) return null;
+            return {
+              sourceQuestionId: q.id,
+              targetConcept: q.targetConcept,
+              subtopic: q.subtopic,
+              previousPrompt: q.prompt,
+              expectedRule: ev.expectedAnswer || ev.conceptDefinition,
+              verdict: ev.verdict,
+              wasGuess: Boolean(ev.isLuckyGuess) || conf === 'guess',
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null)
+      : [];
 
     const retrievalQuery = [
       title,
@@ -461,28 +490,38 @@ ${sourceContent.slice(0, 6000)}
 
 ${
   kb.contextBlock
-    ? `FONTES PRIMÁRIAS DA BASE GIT (priorize este conteúdo confiável para formular as perguntas e alternativas):\n${kb.contextBlock}`
+    ? `FONTES PRIMÁRIAS DA BASE DE ESTUDOS (priorize este conteúdo confiável para formular as perguntas e alternativas):\n${kb.contextBlock}`
     : ''
 }
 
 ${
   webFallback.notes
-    ? `COMPLEMENTO WEB (para eventual lacuna não presente na Base Git):\n${webFallback.notes}`
+    ? `COMPLEMENTO WEB (para eventual lacuna não presente na Base de Estudos):\n${webFallback.notes}`
     : ''
 }
 
 ${
   isOvertime
-    ? `MODO PRORROGAÇÃO: Gere entre 2 e 4 perguntas focadas EXCLUSIVAMENTE em retestar e consolidar estes pontos fracos que restaram após a Rodada 10 (priorize formato "open" para reteste direto):
+    ? `MODO PRORROGAÇÃO: Gere entre 2 e 4 perguntas focadas EXCLUSIVAMENTE em retestar e consolidar estes pontos fracos que restaram após a Rodada 10 (varie obrigatoriamente o cenário prático e redação em relação às perguntas anteriores):
 ${JSON.stringify(unresolvedWeakPoints, null, 2)}`
-    : `Planejamento desta rodada:
+    : `Planejamento desta rodada (tópicos novos):
 ${JSON.stringify(targetPlan ?? { roundNumber: currentRound, topics: [title], difficultyTier: 'Progressivo' })}
 
-Pontos fracos ativos ainda não resolvidos (DEVEM ser retestados com novas perguntas em formato "open" equilibradas com os tópicos novos desta rodada):
+${
+  immediateRetestTargets.length > 0
+    ? `RETESTES IMEDIATOS OBRIGATÓRIOS NA RODADA ATUAL (erros ou acertos no chute da rodada anterior — DEVEM aparecer nesta rodada junto aos tópicos novos):
+${JSON.stringify(immediateRetestTargets, null, 2)}
+
+REGRA DE VARIAÇÃO DE CENÁRIO PARA RETESTES (OBRIGATÓRIA):
+Para cada reteste acima, teste EXATAMENTE a mesma regra, exceção ou detalhe, MAS altere completamente o caso concreto, nomes, valores, situação fática e redação das alternativas para que o estudante não responda por memória visual.`
+    : ''
+}
+
+Outros pontos fracos ainda não resolvidos na sessão:
 ${JSON.stringify(unresolvedWeakPoints, null, 2)}`
 }
 
-Histórico recente das últimas rodadas (evite repetir exatamente a mesma formulação de pergunta; se for reteste, aborde o mesmo conceito por um ângulo ou caso diferente):
+Histórico recente das últimas rodadas (NUNCA repita caso concreto, valores ou redação já usados):
 ${JSON.stringify(
   lastThreeRounds.map((r) => ({
     roundNumber: r.roundNumber,
@@ -490,18 +529,26 @@ ${JSON.stringify(
       prompt: q.prompt,
       format: q.format,
       targetConcept: q.targetConcept,
-      evaluations: r.evaluations.find((e) => e.questionId === q.id)?.verdict,
+      verdict: r.evaluations.find((e) => e.questionId === q.id)?.verdict,
     })),
   })),
   null,
   2
 )}
 
-REGRAS DE FORMATO DA RODADA:
-- Você decide a proporção entre "multiple_choice" (alternativas A, B, C, D, E) e "open" (resposta aberta) conforme a dificuldade da rodada (podendo chegar a ~50% de cada tipo).
-- Use "multiple_choice" (com exatamente 5 alternativas plausíveis e bem diferenciadas: A, B, C, D, E) para perguntas difíceis, amplas demais ou com várias exceções/pegadinhas.
-- Use "open" (com "options": []) para perguntas de RETESTE ("isRetest": true) ou perguntas diretas (definições objetivas, cálculos, totais, diferenças curtas).
-- NUNCA inclua a resposta correta no enunciado nem dê dicas sobre qual alternativa é a correta.
+REGRAS DE ALTERNÂNCIA DE FORMATOS NA RODADA (3 a 4 questões no total):
+Alterne os formatos de cobrança conforme a progressão na sessão:
+1. "multiple_choice": 5 alternativas plausíveis e bem diferenciadas ("A", "B", "C", "D", "E"). Ideal para discriminação fina entre regras e exceções.
+2. "true_false": julgamento objetivo de assertiva (Certo ou Errado) focado em prazos, competências, exceções ou texto literal de regra. Enunciado afirmativo claro para julgar como Certo ou Errado; retorne exatamente 2 opções: [{ "label": "A", "text": "Certo" }, { "label": "B", "text": "Errado" }].
+3. "practical_case": mini-caso prático realista de aplicação direta da regra (2 a 4 linhas). Alterne os mini-casos entre:
+   - resposta discursiva curta ("options": [])
+   - múltipla escolha com 5 alternativas ("A".."E").
+4. "open": pergunta direta aberta ("options": []) para definições curtas, cálculos ou diferenças diretas.
+
+Regras para campos de reteste:
+- Se a pergunta for um reteste de erro/chute anterior: defina "isRetest": true, preencha "retestRule" com a regra/tópico exato retestado (máx. 140 caracteres) e mantenha "targetConcept" alinhado ao ponto fraco.
+- Se for tópico novo: defina "isRetest": false e "retestRule": "".
+- NUNCA revele a resposta no enunciado nem dê dicas sobre a alternativa correta.
 
 ${
   needsStrategicSynthesis
@@ -522,32 +569,36 @@ ${
             properties: {
               difficultyLabel: {
                 type: Type.STRING,
-                description: 'Nível de dificuldade da rodada (ex: Nível Inicial, Intermediário, Avançado, Exceções e Pegadinhas, Prorrogação).',
+                description: 'Nível de dificuldade da rodada (ex: Base Conceitual, Aplicação Direta, Exceções e Detalhes, Prorrogação).',
               },
               questions: {
                 type: Type.ARRAY,
-                description: '3 a 4 perguntas mistas (2 a 4 na prorrogação).',
+                description: '3 a 4 perguntas alternando formatos (2 a 4 na prorrogação).',
                 items: {
                   type: Type.OBJECT,
                   properties: {
                     format: {
                       type: Type.STRING,
-                      enum: ['open', 'multiple_choice'],
+                      enum: ['multiple_choice', 'true_false', 'practical_case', 'open'],
                     },
                     prompt: { type: Type.STRING },
                     questionType: {
                       type: Type.STRING,
-                      description: 'Ex: Múltipla Escolha Analítica, Definição, Classificação, Cálculo, Diferenciação, Caso Prático.',
+                      description: 'Ex: Múltipla Escolha Analítica, Certo ou Errado, Mini-caso Prático, Definição Direta.',
                     },
                     subtopic: { type: Type.STRING },
                     isRetest: { type: Type.BOOLEAN },
+                    retestRule: {
+                      type: Type.STRING,
+                      description: 'Regra ou tópico original sendo retestado com novo cenário (ou string vazia se isRetest=false).',
+                    },
                     targetConcept: {
                       type: Type.STRING,
                       description: 'Conceito exato sendo avaliado (se isRetest=true, use o conceito do ponto fraco correspondente).',
                     },
                     options: {
                       type: Type.ARRAY,
-                      description: 'Exatamente 5 opções (A, B, C, D, E) se format="multiple_choice", ou array vazio [] se format="open".',
+                      description: '5 opções (A–E) para multiple_choice ou practical_case objetivo; 2 opções (A=Certo, B=Errado) para true_false; [] para open ou practical_case discursivo.',
                       items: {
                         type: Type.OBJECT,
                         properties: {
@@ -561,7 +612,16 @@ ${
                       },
                     },
                   },
-                  required: ['format', 'prompt', 'questionType', 'subtopic', 'isRetest', 'targetConcept', 'options'],
+                  required: [
+                    'format',
+                    'prompt',
+                    'questionType',
+                    'subtopic',
+                    'isRetest',
+                    'retestRule',
+                    'targetConcept',
+                    'options',
+                  ],
                 },
               },
               hasStrategicSynthesis: { type: Type.BOOLEAN },
@@ -598,11 +658,12 @@ ${
     const parsed = JSON.parse((response.text ?? '{}').trim()) as {
       difficultyLabel: string;
       questions: Array<{
-        format: 'open' | 'multiple_choice';
+        format: QuestionFormat;
         prompt: string;
         questionType: string;
         subtopic: string;
         isRetest: boolean;
+        retestRule?: string;
         targetConcept: string;
         options: Array<{ label: 'A' | 'B' | 'C' | 'D' | 'E'; text: string }>;
       }>;
@@ -616,18 +677,61 @@ ${
     };
 
     const questions: TrainerQuestion[] = (parsed.questions || []).map((q, idx) => {
-      const hasValidOptions = q.format === 'multiple_choice' && Array.isArray(q.options) && q.options.length === 5;
+      let normalizedFormat: QuestionFormat = q.format;
+      let normalizedOptions = Array.isArray(q.options) ? q.options : [];
+
+      if (normalizedFormat === 'true_false') {
+        normalizedOptions = [
+          { label: 'A', text: 'Certo' },
+          { label: 'B', text: 'Errado' },
+        ];
+      } else if (normalizedFormat === 'multiple_choice') {
+        if (normalizedOptions.length < 4) {
+          normalizedFormat = 'open';
+          normalizedOptions = [];
+        } else {
+          normalizedOptions = normalizedOptions.slice(0, 5);
+        }
+      } else if (normalizedFormat === 'practical_case') {
+        if (normalizedOptions.length >= 4) {
+          normalizedOptions = normalizedOptions.slice(0, 5);
+        } else {
+          normalizedOptions = [];
+        }
+      } else {
+        normalizedFormat = 'open';
+        normalizedOptions = [];
+      }
+
+      const matchedRetestTarget = q.isRetest
+        ? immediateRetestTargets.find(
+            (t) =>
+              t.targetConcept.trim().toLowerCase() === (q.targetConcept || '').trim().toLowerCase()
+          )
+        : undefined;
+
       return {
         id: `r${currentRound}_q${idx + 1}_${Date.now()}`,
-        format: hasValidOptions ? 'multiple_choice' : 'open',
+        format: normalizedFormat,
         prompt: q.prompt,
-        questionType: q.questionType || (hasValidOptions ? 'Múltipla Escolha' : 'Pergunta Direta'),
+        questionType:
+          q.questionType ||
+          (normalizedFormat === 'true_false'
+            ? 'Certo ou Errado'
+            : normalizedFormat === 'practical_case'
+              ? 'Mini-caso Prático'
+              : normalizedFormat === 'multiple_choice'
+                ? 'Múltipla Escolha'
+                : 'Pergunta Direta'),
         subtopic: q.subtopic || title,
         isRetest: Boolean(q.isRetest),
+        retestRule: q.isRetest ? (q.retestRule || q.targetConcept || q.subtopic || '').slice(0, 180) : undefined,
+        retestSourceQuestionId: matchedRetestTarget?.sourceQuestionId,
         targetConcept: q.targetConcept || q.subtopic,
-        options: hasValidOptions ? q.options : [],
+        options: normalizedOptions,
         userSelectedOption: '',
         userAnswer: '',
+        userRationale: '',
       };
     });
 
@@ -705,7 +809,7 @@ ${
     : ''
 }
 
-Perguntas, Respostas e Confiança Declarada do Aluno:
+Perguntas, Respostas, Justificativas e Confiança Declarada do Aluno:
 ${JSON.stringify(
   questions.map((q) => ({
     questionId: q.id,
@@ -717,6 +821,7 @@ ${JSON.stringify(
     options: q.options,
     userSelectedOption: q.userSelectedOption,
     userAnswer: q.userAnswer,
+    userRationale: (q.userRationale || '').trim(),
     confidence: q.confidence || 'certain',
   })),
   null,
@@ -724,13 +829,17 @@ ${JSON.stringify(
 )}
 
 Instruções de correção:
-- Para questões "multiple_choice": compare "userSelectedOption" com a alternativa verdadeiramente correta dentre A, B, C, D, E; informe "correctOption" com a letra correta ("A".."E"); classifique "verdict" como "correct" se acertou ou "incorrect" se errou, e explique objetivamente por que a correta é válida e por que a escolhida (se errada) falha.
-- Para questões "open": preencha "correctOption" com ""; classifique "verdict" como "correct", "partial" ou "incorrect"; explique objetivamente o que acertou, o que faltou ou qual foi a pegadinha.
-- Calibração de confiança: observe "confidence" ("certain" = Certeza, "unsure" = Dúvida, "guess" = Chute). Se acertou com "guess", reforce a explicação da regra para transformar o chute em retenção real; se errou com "certain", aponte exatamente a confusão conceitual que gerou falsa segurança.
+- Para questões "multiple_choice" ou "practical_case" com opções A–E: compare "userSelectedOption" com a alternativa correta; informe "correctOption" ("A".."E"); classifique "verdict" ("correct" ou "incorrect").
+- Para questões "true_false": considere "A" = Certo e "B" = Errado; informe "correctOption" ("A" ou "B"); classifique "verdict" ("correct" ou "incorrect") e explique exatamente o trecho ou exceção que torna a assertiva verdadeira ou falsa.
+- Para questões "open" ou "practical_case" sem opções: preencha "correctOption" com ""; classifique "verdict" como "correct", "partial" ou "incorrect".
+- AVALIAÇÃO DA JUSTIFICATIVA OPCIONAL ("userRationale"):
+  - Se "userRationale" estiver preenchido, preencha "rationaleFeedback" com 1 a 2 frases comparando diretamente o raciocínio escrito pelo aluno com o fundamento oficial. ATENÇÃO ESPECIAL: se o aluno marcou a alternativa certa mas sua justificativa usar o motivo errado, alerte explicitamente em "rationaleFeedback" sobre o acerto pela razão equivocada.
+  - Se "userRationale" estiver vazio, retorne "rationaleFeedback": "".
+- Calibração de confiança: observe "confidence" ("certain" = Certeza, "unsure" = Dúvida, "guess" = Chute). Se acertou com "guess", reforce a explicação da regra; se errou com "certain", aponte a armadilha conceitual.
 - Preencha "expectedAnswer" com a resposta completa esperada de forma concisa.
-- REGRA DE DEFINIÇÃO: Em "conceptDefinition", forneça uma definição objetiva e direta do termo técnico ou conceito central tratado na questão (nunca apenas uma listagem seca), ancorada na Base Git sempre que disponível.
+- REGRA DE DEFINIÇÃO: Em "conceptDefinition", forneça uma definição objetiva e direta do termo técnico ou conceito central tratado na questão.
 - Defina "weakPointTriggered": true sempre que o verdict for "partial" ou "incorrect" OU quando acertar no "guess" (chute).
-- Escreva "roundSummary" com uma síntese curta (1 a 2 frases) do desempenho nesta rodada (mencionando chutes ou erros de alta confiança se houver).`;
+- Escreva "roundSummary" com uma síntese curta (1 a 2 frases) do desempenho nesta rodada.`;
 
     const response = await withRetry(() =>
       ai.models.generateContent({
@@ -754,6 +863,7 @@ Instruções de correção:
                       enum: ['correct', 'partial', 'incorrect'],
                     },
                     feedback: { type: Type.STRING },
+                    rationaleFeedback: { type: Type.STRING },
                     expectedAnswer: { type: Type.STRING },
                     correctOption: {
                       type: Type.STRING,
@@ -766,6 +876,7 @@ Instruções de correção:
                     'questionId',
                     'verdict',
                     'feedback',
+                    'rationaleFeedback',
                     'expectedAnswer',
                     'correctOption',
                     'conceptDefinition',
@@ -789,10 +900,12 @@ Instruções de correção:
     const enrichedEvaluations: QuestionEvaluation[] = (parsed.evaluations || []).map((ev) => {
       const q = questions.find((item) => item.id === ev.questionId);
       const conf = q?.confidence || '';
+      const hasRationale = Boolean(q?.userRationale && q.userRationale.trim().length > 0);
       const isLuckyGuess = ev.verdict === 'correct' && conf === 'guess';
       const isConfidentError = ev.verdict !== 'correct' && conf === 'certain';
       return {
         ...ev,
+        rationaleFeedback: hasRationale ? (ev.rationaleFeedback || '').trim() : '',
         confidenceAtSubmit: conf,
         isLuckyGuess,
         isConfidentError,
@@ -810,7 +923,7 @@ Instruções de correção:
   }
 });
 
-// 4. Generate mandatory Final Ultracompact ASCII/Unicode Tree Synthesis
+// 4. Generate mandatory Final Structured Hierarchical Tree Synthesis
 app.post('/api/trainer/finalize', async (req, res) => {
   try {
     const { title, sourceContent, selectedKbPaths, syllabus, rounds, activeWeakPoints } = req.body as {
@@ -837,14 +950,17 @@ app.post('/api/trainer/finalize', async (req, res) => {
         return {
           subtopic: q.subtopic,
           concept: q.targetConcept,
+          format: q.format,
           verdict: ev?.verdict ?? 'unanswered',
+          wasLuckyGuess: Boolean(ev?.isLuckyGuess),
+          errorCause: ev?.errorCause || '',
           expected: ev?.expectedAnswer ?? '',
           definition: ev?.conceptDefinition ?? '',
         };
       }),
     }));
 
-    const prompt = `O treino ativo sobre "${title}" foi concluído. Gere agora a SÍNTESE ULTRACOMPACTA FINAL obrigatória de TUDO o que foi estudado na sessão.
+    const prompt = `O treino ativo sobre "${title}" foi concluído. Gere agora a SÍNTESE FINAL EM ÁRVORE HIERÁRQUICA obrigatória consolidando tudo o que foi estudado.
 
 Escopo original:
 """
@@ -853,25 +969,38 @@ ${sourceContent.slice(0, 5000)}
 
 ${
   kb.contextBlock
-    ? `FONTES PRIMÁRIAS DA BASE GIT:\n${kb.contextBlock}`
+    ? `FONTES PRIMÁRIAS DA BASE DE ESTUDOS:\n${kb.contextBlock}`
     : ''
 }
 
 Plano de tópicos:
 ${JSON.stringify(syllabus, null, 2)}
 
-Histórico das rodadas e conceitos avaliados:
+Histórico das rodadas e conceitos avaliados (incluindo erros, chutes e causas marcadas):
 ${JSON.stringify(compactHistory, null, 2)}
 
 Pontos fracos enfrentados durante a sessão:
 ${JSON.stringify(activeWeakPoints, null, 2)}
 
 REQUISITOS ESTRITOS PARA "asciiTree":
-1. Use EXCLUSIVAMENTE formato de árvore hierárquica ASCII/Unicode com os conectores ├─, └─ e │.
-2. NÃO inclua blocos markdown (\`\`\`) dentro da string asciiTree — retorne somente o texto puro da árvore.
-3. As raízes principais devem estar em CAIXA ALTA para os grandes temas estudados.
-4. Desdobre regras, exceções, cálculos/fórmulas, classificações e diferenciais lógicos com alta densidade técnica e máxima economia de palavras.
-5. Inclua especialmente os pontos em que o aluno teve dificuldade para garantir a consolidação definitiva.
+1. Use EXCLUSIVAMENTE conectores Unicode limpos: ├──, └── e │ (exatamente esses caracteres para boa leitura e indentação).
+2. NÃO inclua crases/blocos markdown (\`\`\`) dentro da string asciiTree — retorne somente o texto puro da árvore.
+3. Organize a árvore obrigatoriamente nesta estrutura exata em 4 blocos principais sob o título raiz:
+   ${title.toUpperCase()}
+   ├── 1. TEMA CENTRAL DA SESSÃO
+   │   ├── ...
+   │   └── ...
+   ├── 2. SUBTÓPICOS PRINCIPAIS E REGRAS GERAIS
+   │   ├── ...
+   │   └── ...
+   ├── 3. EXCEÇÕES, PRAZOS, COMPETÊNCIAS E CONDIÇÕES ESPECÍFICAS
+   │   ├── ...
+   │   └── ...
+   └── 4. PONTOS DE ATENÇÃO E PEGADINHAS DAS RODADAS ERRADAS OU CHUTADAS
+       ├── ...
+       └── ...
+4. Mantenha linhas concisas (preferencialmente até ~70 caracteres por linha quando possível, usando subnós │   ├── para detalhes) com alta densidade técnica e zero enrolação.
+5. No bloco 4, dê destaque explícito às pegadinhas, detalhes e exceções das questões em que o aluno errou ou acertou por chute nesta sessão.
 
 Em "closingFeedback", escreva um parecer final objetivo (2 a 4 frases) avaliando a evolução do aluno, destacando os pontos dominados e eventuais atenções finais.`;
 
@@ -908,6 +1037,186 @@ Em "closingFeedback", escreva um parecer final objetivo (2 a 4 frases) avaliando
     res.json({
       asciiTree: cleanTree,
       closingFeedback: parsed.closingFeedback || 'Treino concluído com síntese consolidada.',
+    });
+  } catch (error) {
+    const formatted = formatErrorMessage(error);
+    res.status(formatted.status).json({ error: formatted.message });
+  }
+});
+
+// 5. Generate comparative table between two related/confused concepts
+app.post('/api/trainer/comparative-table', async (req, res) => {
+  try {
+    const { discipline, conceptA, conceptB, contextNotes } = req.body as {
+      discipline: string;
+      conceptA: string;
+      conceptB?: string;
+      contextNotes?: string;
+    };
+
+    if (!conceptA?.trim()) {
+      res.status(400).json({ error: 'Informe ao menos um conceito para comparar.' });
+      return;
+    }
+
+    const ai = getAiClient();
+    const retrievalQuery = [discipline, conceptA, conceptB || ''].filter(Boolean).join(' ');
+    const kb = await retrieveGitKnowledge({
+      queryText: retrievalQuery,
+      maxTotalChars: 10000,
+    });
+
+    const hasExplicitConceptB =
+      Boolean(conceptB?.trim()) &&
+      !conceptB!.toLowerCase().startsWith('conceito correlato');
+
+    const prompt = `Crie um QUADRO COMPARATIVO DE ALTA PRECISÃO para revisão de prova na disciplina "${discipline || 'Conhecimentos Gerais'}".
+
+Conceito A: "${conceptA.trim()}"
+${
+  hasExplicitConceptB
+    ? `Conceito B: "${conceptB!.trim()}"`
+    : `Conceito B não informado explicitamente: identifique o conceito irmão ou instituto mais frequentemente confundido em provas com "${conceptA.trim()}" nesta disciplina e use-o como Conceito B.`
+}
+${contextNotes ? `Contexto de dúvidas/erros do aluno: ${contextNotes.slice(0, 1200)}` : ''}
+
+${
+  kb.contextBlock
+    ? `FONTES PRIMÁRIAS DA BASE DE ESTUDOS (use como referência prioritária):\n${kb.contextBlock}`
+    : ''
+}
+
+REGRAS DO QUADRO COMPARATIVO:
+1. Gere entre 4 e 6 linhas de comparação realmente decisivas para acertar questões de prova (natureza jurídica/técnica, requisitos, prazos/limites, competência, exceções e efeitos).
+2. Cada linha deve ter 4 campos curtos, diretos e contrastantes:
+   - "criterion": Critério de comparação
+   - "conceptAValue": Como funciona no Conceito A
+   - "conceptBValue": Como funciona no Conceito B
+   - "examDecisiveDiff": Diferença decisiva na prova (como a banca costuma trocar um pelo outro)
+3. Preencha "summaryTip" com 1 a 2 frases com o macete ou critério-chave de distinção rápida.`;
+
+    const response = await withRetry(() =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              conceptA: { type: Type.STRING },
+              conceptB: { type: Type.STRING },
+              summaryTip: { type: Type.STRING },
+              rows: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    criterion: { type: Type.STRING },
+                    conceptAValue: { type: Type.STRING },
+                    conceptBValue: { type: Type.STRING },
+                    examDecisiveDiff: { type: Type.STRING },
+                  },
+                  required: [
+                    'criterion',
+                    'conceptAValue',
+                    'conceptBValue',
+                    'examDecisiveDiff',
+                  ],
+                },
+              },
+            },
+            required: ['title', 'conceptA', 'conceptB', 'summaryTip', 'rows'],
+          },
+        },
+      })
+    );
+
+    const parsed = JSON.parse((response.text ?? '{}').trim()) as {
+      title: string;
+      conceptA: string;
+      conceptB: string;
+      summaryTip: string;
+      rows: ComparativeTableRow[];
+    };
+
+    res.json({
+      title: parsed.title || `${parsed.conceptA || conceptA} × ${parsed.conceptB || conceptB || 'Conceito Correlato'}`,
+      conceptA: parsed.conceptA || conceptA.trim(),
+      conceptB: parsed.conceptB || conceptB?.trim() || 'Conceito Correlato',
+      summaryTip: parsed.summaryTip || '',
+      rows: Array.isArray(parsed.rows) ? parsed.rows.slice(0, 8) : [],
+    });
+  } catch (error) {
+    const formatted = formatErrorMessage(error);
+    res.status(formatted.status).json({ error: formatted.message });
+  }
+});
+
+// 6. Generate concise contextual theory explanation when student flags lack_of_theory
+app.post('/api/trainer/theory-summary', async (req, res) => {
+  try {
+    const { discipline, concept, subtopic, expectedAnswer } = req.body as {
+      discipline?: string;
+      concept: string;
+      subtopic?: string;
+      expectedAnswer?: string;
+    };
+
+    if (!concept?.trim()) {
+      res.status(400).json({ error: 'Conceito não informado.' });
+      return;
+    }
+
+    const ai = getAiClient();
+    const kb = await retrieveGitKnowledge({
+      queryText: `${discipline || ''} ${concept} ${subtopic || ''}`,
+      maxTotalChars: 9000,
+    });
+
+    const prompt = `O estudante marcou "Falta de base teórica" ao errar uma questão sobre "${concept}" (${subtopic || discipline || 'Estudo Ativo'}).
+${expectedAnswer ? `Referência da questão: ${expectedAnswer.slice(0, 600)}` : ''}
+${kb.contextBlock ? `FONTES PRIMÁRIAS DA BASE DE ESTUDOS:\n${kb.contextBlock}` : ''}
+
+Produza uma explicação teórica resumida, didática e direta ao ponto para construir a base desse conceito sem textão:
+- coreRule: explicação clara da regra geral e seus fundamentos em 2-4 frases.
+- practicalExample: 1 exemplo prático curto aplicando a regra.
+- commonTrap: a principal pegadinha ou exceção cobrada em prova.
+- memoryAnchor: 1 frase curta de fixação mental.`;
+
+    const response = await withRetry(() =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              concept: { type: Type.STRING },
+              coreRule: { type: Type.STRING },
+              practicalExample: { type: Type.STRING },
+              commonTrap: { type: Type.STRING },
+              memoryAnchor: { type: Type.STRING },
+            },
+            required: ['concept', 'coreRule', 'practicalExample', 'commonTrap', 'memoryAnchor'],
+          },
+        },
+      })
+    );
+
+    const parsed = JSON.parse((response.text ?? '{}').trim()) as TheorySummaryContent;
+    res.json({
+      concept: parsed.concept || concept,
+      coreRule: parsed.coreRule || expectedAnswer || '',
+      practicalExample: parsed.practicalExample || '',
+      commonTrap: parsed.commonTrap || '',
+      memoryAnchor: parsed.memoryAnchor || '',
     });
   } catch (error) {
     const formatted = formatErrorMessage(error);

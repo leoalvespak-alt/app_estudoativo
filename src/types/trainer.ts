@@ -1,10 +1,20 @@
 export type SourceType = 'topic' | 'text' | 'git_kb' | 'weak_points';
 
-export type QuestionFormat = 'open' | 'multiple_choice';
+export type QuestionFormat =
+  | 'open'
+  | 'multiple_choice'
+  | 'true_false'
+  | 'practical_case';
 
 export type OptionLetter = 'A' | 'B' | 'C' | 'D' | 'E';
 
 export type ConfidenceLevel = 'certain' | 'unsure' | 'guess';
+
+export type ErrorCause =
+  | 'lack_of_theory'
+  | 'rushed_reading'
+  | 'concept_confusion'
+  | 'detail_slip';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -39,6 +49,8 @@ export interface UserProfile {
   displayName: string;
   createdAt?: string;
   lastActiveAt?: string;
+  onboardingCompleted?: boolean;
+  onboardingCompletedAt?: string;
 }
 
 export type SessionStatus =
@@ -78,10 +90,13 @@ export interface TrainerQuestion {
   questionType: string;
   subtopic: string;
   isRetest: boolean;
+  retestRule?: string;
+  retestSourceQuestionId?: string;
   targetConcept: string;
   options: QuestionOption[];
   userSelectedOption: OptionLetter | '';
   userAnswer: string;
+  userRationale?: string;
   confidence?: ConfidenceLevel | '';
 }
 
@@ -89,6 +104,7 @@ export interface QuestionEvaluation {
   questionId: string;
   verdict: Verdict;
   feedback: string;
+  rationaleFeedback?: string;
   expectedAnswer: string;
   correctOption: OptionLetter | '';
   conceptDefinition: string;
@@ -96,6 +112,7 @@ export interface QuestionEvaluation {
   confidenceAtSubmit?: ConfidenceLevel | '';
   isLuckyGuess?: boolean;
   isConfidentError?: boolean;
+  errorCause?: ErrorCause | '';
 }
 
 export interface RoundRecord {
@@ -138,6 +155,8 @@ export interface WeakPointBankEntry {
   errorCount: number;
   guessCount: number;
   retestSuccessCount: number;
+  lastErrorCause?: ErrorCause;
+  errorCauseCounts?: Partial<Record<ErrorCause, number>>;
   createdAt: string;
   updatedAt: string;
 }
@@ -165,6 +184,12 @@ export interface FinalSynthesis {
   generatedAt: string;
 }
 
+export interface SurgicalFocusInfo {
+  label: string;
+  targetedConcepts: string[];
+  discipline?: string;
+}
+
 export interface TrainingSession {
   id: string;
   ownerUsername: string;
@@ -183,15 +208,50 @@ export interface TrainingSession {
   activeWeakPoints: WeakPoint[];
   strategicSyntheses: StrategicSynthesis[];
   finalSynthesis: FinalSynthesis | null;
+  surgicalFocus?: SurgicalFocusInfo | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ComparativeTableRow {
+  criterion: string;
+  conceptAValue: string;
+  conceptBValue: string;
+  examDecisiveDiff: string;
+}
+
+export interface ComparativeTableEntry {
+  id: string;
+  ownerUsername: string;
+  discipline: string;
+  title: string;
+  conceptA: string;
+  conceptB: string;
+  triggerReason: 'auto_confusion' | 'on_demand';
+  rows: ComparativeTableRow[];
+  summaryTip?: string;
+  sourceSessionId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TheorySummaryContent {
+  concept: string;
+  coreRule: string;
+  practicalExample: string;
+  commonTrap: string;
+  memoryAnchor: string;
 }
 
 export interface LibraryEntry {
   id: string;
   sessionId: string;
   sessionTitle: string;
-  kind: 'final_tree' | 'strategic_synthesis' | 'prep_class';
+  kind:
+    | 'hierarchical_tree'
+    | 'comparative_table'
+    | 'strategic_synthesis'
+    | 'prep_class';
   title: string;
   subtitle: string;
   createdAt: string;
@@ -199,5 +259,6 @@ export interface LibraryEntry {
   closingFeedback?: string;
   strategicSynthesis?: StrategicSynthesis;
   prepClass?: PrepClassContent;
+  comparativeTable?: ComparativeTableEntry;
   weakPointsCount?: number;
 }

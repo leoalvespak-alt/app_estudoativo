@@ -25,18 +25,35 @@ service cloud.firestore {
 
     function isValidUserProfile(data, usernameKey) {
       return data.keys().hasAll(['usernameKey', 'displayName', 'createdAt', 'lastActiveAt'])
-        && data.keys().hasOnly(['usernameKey', 'displayName', 'createdAt', 'lastActiveAt'])
+        && data.keys().hasOnly([
+          'usernameKey',
+          'displayName',
+          'createdAt',
+          'lastActiveAt',
+          'onboardingCompleted',
+          'onboardingCompletedAt'
+        ])
         && data.usernameKey == usernameKey
         && isValidUsernameKey(data.usernameKey)
         && data.displayName is string
         && data.displayName.size() >= 3
         && data.displayName.size() <= 40
         && data.createdAt is timestamp
-        && data.lastActiveAt is timestamp;
+        && data.lastActiveAt is timestamp
+        && isValidOptionalBool(data, 'onboardingCompleted')
+        && isValidOptionalTimestamp(data, 'onboardingCompletedAt');
     }
 
     function isValidOptionalMap(data, key) {
       return !(key in data) || data[key] == null || data[key] is map;
+    }
+
+    function isValidOptionalBool(data, key) {
+      return !(key in data) || data[key] == null || data[key] is bool;
+    }
+
+    function isValidOptionalTimestamp(data, key) {
+      return !(key in data) || data[key] == null || data[key] is timestamp;
     }
 
     function isValidOptionalString(data, key, maxLen) {
@@ -88,6 +105,7 @@ service cloud.firestore {
           'activeWeakPoints',
           'strategicSyntheses',
           'finalSynthesis',
+          'surgicalFocus',
           'createdAt',
           'updatedAt'
         ])
@@ -124,6 +142,7 @@ service cloud.firestore {
         && (data.strategicSyntheses.size() == 0 || data.strategicSyntheses[0] is map)
         && isValidOptionalMap(data, 'prepClass')
         && isValidOptionalMap(data, 'finalSynthesis')
+        && isValidOptionalMap(data, 'surgicalFocus')
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -160,6 +179,8 @@ service cloud.firestore {
           'errorCount',
           'guessCount',
           'retestSuccessCount',
+          'lastErrorCause',
+          'errorCauseCounts',
           'createdAt',
           'updatedAt'
         ])
@@ -193,6 +214,62 @@ service cloud.firestore {
         && data.retestSuccessCount is int
         && data.retestSuccessCount >= 0
         && data.retestSuccessCount <= 10000
+        && (!('lastErrorCause' in data) || data.lastErrorCause == null || data.lastErrorCause in ['lack_of_theory', 'rushed_reading', 'concept_confusion', 'detail_slip'])
+        && isValidOptionalMap(data, 'errorCauseCounts')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidComparativeTable(data, usernameKey, tableId) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUsername',
+          'discipline',
+          'title',
+          'conceptA',
+          'conceptB',
+          'triggerReason',
+          'rows',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'ownerUsername',
+          'discipline',
+          'title',
+          'conceptA',
+          'conceptB',
+          'triggerReason',
+          'rows',
+          'summaryTip',
+          'sourceSessionId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id == tableId
+        && isValidId(data.id)
+        && data.ownerUsername == usernameKey
+        && isValidUsernameKey(data.ownerUsername)
+        && data.discipline is string
+        && data.discipline.size() >= 1
+        && data.discipline.size() <= 100
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 160
+        && data.conceptA is string
+        && data.conceptA.size() >= 1
+        && data.conceptA.size() <= 160
+        && data.conceptB is string
+        && data.conceptB.size() >= 1
+        && data.conceptB.size() <= 160
+        && data.triggerReason in ['auto_confusion', 'on_demand']
+        && data.rows is list
+        && data.rows.size() >= 1
+        && data.rows.size() <= 15
+        && data.rows[0] is map
+        && isValidOptionalString(data, 'summaryTip', 1000)
+        && isValidOptionalString(data, 'sourceSessionId', 128)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -204,14 +281,26 @@ service cloud.firestore {
       allow create: if isValidUsernameKey(usernameKey)
         && isValidUserProfile(incoming(), usernameKey)
         && incoming().createdAt == request.time
-        && incoming().lastActiveAt == request.time;
+        && incoming().lastActiveAt == request.time
+        && (!('onboardingCompletedAt' in incoming()) || incoming().onboardingCompletedAt == null || incoming().onboardingCompletedAt == request.time);
 
       allow update: if isValidUsernameKey(usernameKey)
         && isValidUserProfile(incoming(), usernameKey)
         && incoming().usernameKey == existing().usernameKey
         && incoming().createdAt == existing().createdAt
         && incoming().lastActiveAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'lastActiveAt']);
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'lastActiveAt'])
+          || (
+            incoming().onboardingCompleted is bool
+            && incoming().onboardingCompletedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'onboardingCompleted',
+              'onboardingCompletedAt',
+              'lastActiveAt'
+            ])
+          )
+        );
 
       allow delete: if false;
 
@@ -290,11 +379,50 @@ service cloud.firestore {
             'errorCount',
             'guessCount',
             'retestSuccessCount',
+            'lastErrorCause',
+            'errorCauseCounts',
             'updatedAt'
           ]);
 
         allow delete: if isValidUsernameKey(usernameKey)
           && isValidId(weakPointId);
+      }
+
+      match /comparativeTables/{tableId} {
+        allow get: if isValidUsernameKey(usernameKey)
+          && isValidId(tableId);
+
+        allow list: if isValidUsernameKey(usernameKey)
+          && resource.data.ownerUsername == usernameKey;
+
+        allow create: if isValidUsernameKey(usernameKey)
+          && isValidId(tableId)
+          && isValidComparativeTable(incoming(), usernameKey, tableId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(usernameKey));
+
+        allow update: if isValidUsernameKey(usernameKey)
+          && isValidId(tableId)
+          && isValidComparativeTable(incoming(), usernameKey, tableId)
+          && incoming().id == existing().id
+          && incoming().ownerUsername == existing().ownerUsername
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'discipline',
+            'title',
+            'conceptA',
+            'conceptB',
+            'triggerReason',
+            'rows',
+            'summaryTip',
+            'sourceSessionId',
+            'updatedAt'
+          ]);
+
+        allow delete: if isValidUsernameKey(usernameKey)
+          && isValidId(tableId);
       }
     }
   }

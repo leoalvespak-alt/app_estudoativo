@@ -1,9 +1,12 @@
-import { useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronUp, Loader2, Send } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowRight, ChevronDown, ChevronUp, Loader2, Send, Target } from 'lucide-react';
 import type {
   ConfidenceLevel,
+  ErrorCause,
   OptionLetter,
+  QuestionEvaluation,
   StrategicSynthesis,
+  TrainerQuestion,
   TrainingSession,
 } from '../types/trainer';
 import { QuestionCard } from './QuestionCard';
@@ -11,7 +14,10 @@ import { LateralProgressPanel } from './LateralProgressPanel';
 
 interface TrainingWorkbenchProps {
   session: TrainingSession;
+  sessionDiscipline: string;
+  generatingComparativeQuestionId?: string | null;
   onChangeAnswer: (roundNumber: number, questionId: string, value: string) => void;
+  onChangeRationale: (roundNumber: number, questionId: string, value: string) => void;
   onSelectOption: (
     roundNumber: number,
     questionId: string,
@@ -22,6 +28,15 @@ interface TrainingWorkbenchProps {
     questionId: string,
     confidence: ConfidenceLevel
   ) => void;
+  onSelectErrorCause: (
+    roundNumber: number,
+    questionId: string,
+    cause: ErrorCause
+  ) => void;
+  onRequestComparativeTable: (
+    question: TrainerQuestion,
+    evaluation: QuestionEvaluation
+  ) => void;
   onSubmitRound: () => void;
   onAdvanceRound: () => void;
   onFinishEarly: () => void;
@@ -31,39 +46,41 @@ interface TrainingWorkbenchProps {
   errorMessage: string | null;
 }
 
+const OPTION_LETTERS: OptionLetter[] = ['A', 'B', 'C', 'D', 'E'];
+
 function StrategicSynthesisCard({ synthesis }: { synthesis: StrategicSynthesis }) {
   return (
     <section
       aria-label={synthesis.title}
-      className="bg-amber-50/50 dark:bg-amber-950/25 border border-[#B45309]/40 dark:border-[#F59E0B]/40 rounded-xl p-6 space-y-4"
+      className="bg-[#F5F2EC] dark:bg-[#1C1B19] border border-[#D6D0C6] dark:border-[#36332E] rounded-xl p-6 space-y-4"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#B45309] dark:text-[#F59E0B] font-semibold">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#44403C] dark:text-[#C2BCB2] font-semibold">
         <span>Síntese Estratégica · Checkpoint após Rodada {synthesis.afterRound}</span>
       </div>
 
-      <h2 className="font-display text-xl font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+      <h2 className="font-display text-xl font-semibold text-[#18181B] dark:text-[#EFECE6]">
         {synthesis.title}
       </h2>
 
-      <p className="text-sm sm:text-[15px] text-[#18181B] dark:text-[#F4F2ED] leading-relaxed">
+      <p className="reading-measure text-[#18181B] dark:text-[#EFECE6]">
         {synthesis.focusSummary}
       </p>
 
       {synthesis.keyDefinitions.length > 0 && (
-        <div className="pt-3 border-t border-[#B45309]/20 dark:border-[#F59E0B]/20 space-y-2.5">
-          <p className="text-xs font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+        <div className="pt-3 border-t border-[#E5E0D8] dark:border-[#36332E] space-y-2.5">
+          <p className="text-xs font-semibold text-[#18181B] dark:text-[#EFECE6]">
             Definições objetivas para consolidar a base
           </p>
           <dl className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {synthesis.keyDefinitions.map((item, idx) => (
               <div
                 key={`${item.term}-${idx}`}
-                className="p-3.5 rounded-lg bg-white dark:bg-[#1A1917] border border-[#E5E2DC] dark:border-[#2E2C28]"
+                className="p-3.5 rounded-lg bg-white dark:bg-[#22201D] border border-[#E5E0D8] dark:border-[#36332E]"
               >
-                <dt className="text-xs font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+                <dt className="text-xs font-semibold text-[#18181B] dark:text-[#EFECE6]">
                   {item.term}
                 </dt>
-                <dd className="mt-1 text-xs text-[#57534E] dark:text-[#A8A29E] leading-relaxed">
+                <dd className="mt-1 text-xs text-[#44403C] dark:text-[#D0CAC0] leading-relaxed">
                   {item.definition}
                 </dd>
               </div>
@@ -74,10 +91,10 @@ function StrategicSynthesisCard({ synthesis }: { synthesis: StrategicSynthesis }
 
       {synthesis.adjacentInsights.length > 0 && (
         <div className="pt-2 space-y-1.5">
-          <p className="text-xs font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+          <p className="text-xs font-semibold text-[#18181B] dark:text-[#EFECE6]">
             Complementos estratégicos adjacentes
           </p>
-          <ul className="space-y-1 text-xs text-[#57534E] dark:text-[#A8A29E] list-disc pl-4">
+          <ul className="space-y-1 text-xs text-[#44403C] dark:text-[#D0CAC0] list-disc pl-4 max-w-[68ch]">
             {synthesis.adjacentInsights.map((insight, idx) => (
               <li key={idx} className="leading-relaxed">
                 {insight}
@@ -90,11 +107,37 @@ function StrategicSynthesisCard({ synthesis }: { synthesis: StrategicSynthesis }
   );
 }
 
+function summarizeRoundFormats(questions: TrainerQuestion[]): string {
+  const counts = {
+    mc: 0,
+    tf: 0,
+    caseItem: 0,
+    open: 0,
+  };
+  for (const q of questions) {
+    if (q.format === 'true_false') counts.tf += 1;
+    else if (q.format === 'practical_case') counts.caseItem += 1;
+    else if (q.format === 'multiple_choice' && q.options.length > 0) counts.mc += 1;
+    else counts.open += 1;
+  }
+  const parts: string[] = [];
+  if (counts.mc > 0) parts.push(`${counts.mc} múltipla escolha`);
+  if (counts.tf > 0) parts.push(`${counts.tf} certo/errado`);
+  if (counts.caseItem > 0) parts.push(`${counts.caseItem} caso prático`);
+  if (counts.open > 0) parts.push(`${counts.open} aberta${counts.open > 1 ? 's' : ''}`);
+  return parts.join(' · ') || `${questions.length} questões`;
+}
+
 export function TrainingWorkbench({
   session,
+  sessionDiscipline,
+  generatingComparativeQuestionId,
   onChangeAnswer,
+  onChangeRationale,
   onSelectOption,
   onSelectConfidence,
+  onSelectErrorCause,
+  onRequestComparativeTable,
   onSubmitRound,
   onAdvanceRound,
   onFinishEarly,
@@ -104,22 +147,127 @@ export function TrainingWorkbench({
   errorMessage,
 }: TrainingWorkbenchProps) {
   const [showPastRounds, setShowPastRounds] = useState(false);
+  const [focusedQuestionId, setFocusedQuestionId] = useState<string | null>(null);
 
   const activeRound = session.rounds[session.rounds.length - 1];
   const pastRounds = session.rounds.slice(0, -1);
+
+  const activeQuestionIds = activeRound?.questions.map((q) => q.id).join('|') ?? '';
+
+  // Keep focused question synced to first question whenever a new round loads
+  useEffect(() => {
+    if (activeRound && activeRound.questions.length > 0) {
+      setFocusedQuestionId(activeRound.questions[0].id);
+    }
+  }, [activeRound?.roundNumber, activeQuestionIds]);
+
+  const isEvaluated = Boolean(activeRound && activeRound.evaluations.length > 0);
+  const allAnswered = Boolean(
+    activeRound &&
+      activeRound.questions.every((q) => {
+        const hasAnswer =
+          q.options.length > 0
+            ? Boolean(q.userSelectedOption)
+            : q.userAnswer.trim().length > 0;
+        return hasAnswer && Boolean(q.confidence);
+      })
+  );
+
+  // Keyboard shortcuts: 1-5 (options A-E), C/D/X (confidence), Enter (submit or advance)
+  useEffect(() => {
+    if (!activeRound) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // Never hijack shortcuts while a modal is open
+      if (document.querySelector('[role="dialog"]')) return;
+
+      // Never hijack shortcuts when typing inside inputs, textareas, selects, or contenteditable
+      const target = e.target as HTMLElement | null;
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isTextControl = (el: HTMLElement | null) => {
+        if (!el) return false;
+        const tag = el.tagName;
+        return (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          el.isContentEditable
+        );
+      };
+      if (isTextControl(target) || isTextControl(activeEl)) {
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        const isRegularButton =
+          activeEl?.tagName === 'BUTTON' &&
+          activeEl.getAttribute('role') !== 'radio';
+        if (isRegularButton) return;
+
+        if (!isEvaluated && allAnswered && !isSubmitting && !isAdvancing && !isFinalizing) {
+          e.preventDefault();
+          onSubmitRound();
+        } else if (isEvaluated && !isAdvancing && !isFinalizing && !isSubmitting) {
+          e.preventDefault();
+          onAdvanceRound();
+        }
+        return;
+      }
+
+      if (isEvaluated || isSubmitting || isAdvancing || isFinalizing) return;
+
+      const targetQuestion =
+        activeRound.questions.find((q) => q.id === focusedQuestionId) ??
+        activeRound.questions[0];
+      if (!targetQuestion) return;
+
+      if (['1', '2', '3', '4', '5'].includes(e.key)) {
+        if (targetQuestion.options.length > 0) {
+          const optIdx = Number(e.key) - 1;
+          const optLetter = OPTION_LETTERS[optIdx];
+          if (optLetter && targetQuestion.options.some((o) => o.label === optLetter)) {
+            e.preventDefault();
+            onSelectOption(activeRound.roundNumber, targetQuestion.id, optLetter);
+          }
+        }
+        return;
+      }
+
+      const lower = e.key.toLowerCase();
+      if (lower === 'c') {
+        e.preventDefault();
+        onSelectConfidence(activeRound.roundNumber, targetQuestion.id, 'certain');
+      } else if (lower === 'd') {
+        e.preventDefault();
+        onSelectConfidence(activeRound.roundNumber, targetQuestion.id, 'unsure');
+      } else if (lower === 'x') {
+        e.preventDefault();
+        onSelectConfidence(activeRound.roundNumber, targetQuestion.id, 'guess');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeRound,
+    focusedQuestionId,
+    isEvaluated,
+    allAnswered,
+    isSubmitting,
+    isAdvancing,
+    isFinalizing,
+    onSelectOption,
+    onSelectConfidence,
+    onSubmitRound,
+    onAdvanceRound,
+  ]);
 
   if (!activeRound) {
     return null;
   }
 
-  const isEvaluated = activeRound.evaluations.length > 0;
-  const allAnswered = activeRound.questions.every((q) => {
-    const hasAnswer =
-      q.format === 'multiple_choice' && q.options.length > 0
-        ? Boolean(q.userSelectedOption)
-        : q.userAnswer.trim().length > 0;
-    return hasAnswer && Boolean(q.confidence);
-  });
   const roundErrorsCount = activeRound.evaluations.filter(
     (e) => e.verdict !== 'correct' || e.weakPointTriggered
   ).length;
@@ -161,24 +309,37 @@ export function TrainingWorkbench({
     }
   }
 
-  const mcCount = activeRound.questions.filter(
-    (q) => q.format === 'multiple_choice' && q.options.length > 0
-  ).length;
-  const openCount = activeRound.questions.length - mcCount;
+  const formatSummary = summarizeRoundFormats(activeRound.questions);
 
   return (
-    <section className="max-w-[1280px] mx-auto px-4 sm:px-8 py-8 sm:py-10">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+    <section className="max-w-[1280px] mx-auto px-4 sm:px-8 py-6 sm:py-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+        {/* Mobile/Tablet Collapsible Session Panel */}
+        <div className="lg:hidden">
+          <LateralProgressPanel
+            session={session}
+            onFinishEarly={onFinishEarly}
+            isFinalizing={isFinalizing}
+          />
+        </div>
+
         <div className="lg:col-span-8 space-y-6">
-          <div className="pb-4 border-b border-[#E5E2DC] dark:border-[#2E2C28] flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">
+          <div className="pb-4 border-b border-[#E5E0D8] dark:border-[#36332E] flex flex-wrap items-end justify-between gap-4">
+            <div className="space-y-1.5">
+              {session.surgicalFocus?.label && (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/35 border border-[#D6D0C6] dark:border-[#45413B] text-xs font-semibold text-[#92400E] dark:text-[#FBBF24]">
+                  <Target className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>{session.surgicalFocus.label}</span>
+                </div>
+              )}
+
+              <p className="text-xs font-medium text-[#44403C] dark:text-[#C2BCB2] tabular-nums">
                 {activeRound.isOvertime
                   ? `Prorrogação · Rodada ${activeRound.roundNumber}`
                   : `Rodada ${String(activeRound.roundNumber).padStart(2, '0')} de 10`}{' '}
                 · {activeRound.difficultyLabel}
               </p>
-              <h1 className="mt-1 font-display text-2xl sm:text-3xl font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+              <h1 className="font-display text-2xl sm:text-3xl font-semibold text-[#18181B] dark:text-[#EFECE6]">
                 {activeRound.isOvertime
                   ? 'Consolidação exclusiva de pontos fracos'
                   : session.syllabus.find((s) => s.roundNumber === activeRound.roundNumber)
@@ -186,12 +347,8 @@ export function TrainingWorkbench({
               </h1>
             </div>
 
-            <span className="text-xs font-mono tabular-nums text-[#57534E] dark:text-[#A8A29E]">
-              {mcCount > 0 && openCount > 0
-                ? `${mcCount} múltipla escolha · ${openCount} abertas`
-                : mcCount > 0
-                  ? `${mcCount} múltipla escolha`
-                  : `${openCount} perguntas abertas`}
+            <span className="text-xs font-mono tabular-nums text-[#44403C] dark:text-[#C2BCB2]">
+              {formatSummary}
             </span>
           </div>
 
@@ -211,6 +368,9 @@ export function TrainingWorkbench({
               const evaluation = activeRound.evaluations.find(
                 (e) => e.questionId === question.id
               );
+              const isFocused =
+                focusedQuestionId === question.id ||
+                (!focusedQuestionId && idx === 0);
               return (
                 <QuestionCard
                   key={question.id}
@@ -218,9 +378,16 @@ export function TrainingWorkbench({
                   question={question}
                   evaluation={evaluation}
                   isEvaluated={isEvaluated}
+                  isFocused={isFocused}
                   disabled={isSubmitting || isAdvancing}
+                  sessionDiscipline={sessionDiscipline}
+                  isGeneratingComparative={generatingComparativeQuestionId === question.id}
+                  onFocusQuestion={() => setFocusedQuestionId(question.id)}
                   onChangeAnswer={(qId, val) =>
                     onChangeAnswer(activeRound.roundNumber, qId, val)
+                  }
+                  onChangeRationale={(qId, val) =>
+                    onChangeRationale(activeRound.roundNumber, qId, val)
                   }
                   onSelectOption={(qId, opt) =>
                     onSelectOption(activeRound.roundNumber, qId, opt)
@@ -228,6 +395,10 @@ export function TrainingWorkbench({
                   onSelectConfidence={(qId, conf) =>
                     onSelectConfidence(activeRound.roundNumber, qId, conf)
                   }
+                  onSelectErrorCause={(qId, cause) =>
+                    onSelectErrorCause(activeRound.roundNumber, qId, cause)
+                  }
+                  onRequestComparativeTable={onRequestComparativeTable}
                   onShortcutSubmit={() => {
                     if (!isEvaluated && allAnswered && !isSubmitting) {
                       onSubmitRound();
@@ -239,25 +410,25 @@ export function TrainingWorkbench({
           </div>
 
           {isEvaluated && activeRound.roundSummary && (
-            <div className="p-5 rounded-xl bg-[#F3F1EC] dark:bg-[#21201D] border border-[#E5E2DC] dark:border-[#2E2C28] space-y-2">
-              <p className="text-xs font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+            <div className="p-5 rounded-xl bg-[#F5F2EC] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E] space-y-2">
+              <p className="text-xs font-semibold text-[#18181B] dark:text-[#EFECE6]">
                 Resumo da avaliação — Rodada {activeRound.roundNumber}
               </p>
-              <p className="text-sm text-[#57534E] dark:text-[#A8A29E] leading-relaxed">
+              <p className="reading-measure text-[#44403C] dark:text-[#D0CAC0]">
                 {activeRound.roundSummary}
               </p>
               {luckyGuessesInRound > 0 && (
-                <p className="text-xs font-medium text-[#B45309] dark:text-[#F59E0B]">
-                  Filtro de chutes: {luckyGuessesInRound} acerto(s) marcado(s) como chute foram encaminhados para reforço.
+                <p className="text-xs font-medium text-[#92400E] dark:text-[#FBBF24]">
+                  Filtro de chutes: {luckyGuessesInRound} acerto(s) marcado(s) como chute foram encaminhados para reforço com novo cenário na próxima rodada.
                 </p>
               )}
               {isRound10 && (
-                <p className="text-xs font-medium text-[#B45309] dark:text-[#F59E0B] pt-1">
+                <p className="text-xs font-medium text-[#18181B] dark:text-[#EFECE6] pt-1">
                   {roundErrorsCount >= 2
                     ? `Foram identificados ${roundErrorsCount} ponto(s) frágil(is) na Rodada 10 (erros ou chutes). Conforme a regra do treino, iniciaremos uma prorrogação curta exclusiva para consolidá-los.`
                     : roundErrorsCount === 1
-                      ? 'Apenas 1 desvio na Rodada 10. Você atingiu o critério de conclusão e já pode gerar sua Síntese Ultracompacta Final.'
-                      : 'Desempenho integral com certeza na Rodada 10. Você já pode concluir o treino e gerar sua Síntese Ultracompacta Final.'}
+                      ? 'Apenas 1 desvio na Rodada 10. Você atingiu o critério de conclusão e já pode gerar sua Árvore Hierárquica Final.'
+                      : 'Desempenho integral com certeza na Rodada 10. Você já pode concluir o treino e gerar sua Árvore Hierárquica Final.'}
                 </p>
               )}
             </div>
@@ -266,18 +437,26 @@ export function TrainingWorkbench({
           <div className="pt-2 flex flex-wrap items-center justify-between gap-4">
             {!isEvaluated ? (
               <>
-                <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">
-                  Responda e marque o nível de confiança em todas as perguntas antes de enviar. Pressione{' '}
-                  <kbd className="px-1.5 py-0.5 rounded border border-[#D6D3CD] dark:border-[#3A3732] bg-white dark:bg-[#1A1917] font-mono text-[11px]">
-                    Ctrl/Cmd + Enter
+                <p className="text-xs text-[#44403C] dark:text-[#C2BCB2]">
+                  Atalhos:{' '}
+                  <kbd className="px-1.5 py-0.5 rounded border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#22201D] font-mono text-[11px]">
+                    1–5
                   </kbd>{' '}
-                  para enviar.
+                  alternativa ·{' '}
+                  <kbd className="px-1.5 py-0.5 rounded border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#22201D] font-mono text-[11px]">
+                    C/D/X
+                  </kbd>{' '}
+                  confiança ·{' '}
+                  <kbd className="px-1.5 py-0.5 rounded border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#22201D] font-mono text-[11px]">
+                    Enter
+                  </kbd>{' '}
+                  enviar
                 </p>
                 <button
                   type="button"
                   disabled={!allAnswered || isSubmitting}
                   onClick={onSubmitRound}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B45309] dark:bg-[#D97706] text-white text-sm font-semibold hover:bg-[#92400E] transition-colors cursor-pointer disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B45309]"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B45309] dark:bg-[#F59E0B] text-[#FAF8F5] dark:text-[#141312] text-sm font-semibold hover:bg-[#92400E] dark:hover:bg-[#FBBF24] transition-colors cursor-pointer disabled:opacity-40"
                 >
                   {isSubmitting ? (
                     <>
@@ -294,7 +473,7 @@ export function TrainingWorkbench({
               </>
             ) : (
               <>
-                <span className="text-xs font-mono tabular-nums text-[#57534E] dark:text-[#A8A29E]">
+                <span className="text-xs font-mono tabular-nums text-[#44403C] dark:text-[#C2BCB2]">
                   {activeRound.questions.length - roundErrorsCount} de{' '}
                   {activeRound.questions.length} corretas nesta rodada
                 </span>
@@ -302,14 +481,14 @@ export function TrainingWorkbench({
                   type="button"
                   disabled={isAdvancing || isFinalizing}
                   onClick={onAdvanceRound}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#18181B] dark:bg-[#F4F2ED] text-[#FAF9F6] dark:text-[#111110] text-sm font-semibold hover:bg-[#27272A] dark:hover:bg-[#E5E2DC] transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B45309]"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B45309] dark:bg-[#F59E0B] text-[#FAF8F5] dark:text-[#141312] text-sm font-semibold hover:bg-[#92400E] dark:hover:bg-[#FBBF24] transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isAdvancing || isFinalizing ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                       <span>
                         {isRound10 && roundErrorsCount < 2
-                          ? 'Gerando Árvore Ultracompacta...'
+                          ? 'Gerando Árvore Hierárquica...'
                           : 'Preparando próxima etapa...'}
                       </span>
                     </>
@@ -317,6 +496,12 @@ export function TrainingWorkbench({
                     <>
                       <span>{nextActionLabel}</span>
                       <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                      <kbd
+                        aria-hidden="true"
+                        className="hidden sm:inline font-mono text-[10px] opacity-80 ml-1"
+                      >
+                        Enter
+                      </kbd>
                     </>
                   )}
                 </button>
@@ -325,11 +510,12 @@ export function TrainingWorkbench({
           </div>
 
           {pastRounds.length > 0 && (
-            <div className="pt-8 border-t border-[#E5E2DC] dark:border-[#2E2C28]">
+            <div className="pt-8 border-t border-[#E5E0D8] dark:border-[#36332E]">
               <button
                 type="button"
+                aria-expanded={showPastRounds}
                 onClick={() => setShowPastRounds((prev) => !prev)}
-                className="inline-flex items-center gap-2 text-sm font-semibold text-[#57534E] dark:text-[#A8A29E] hover:text-[#18181B] dark:hover:text-[#F4F2ED] cursor-pointer"
+                className="inline-flex items-center gap-2 text-sm font-semibold text-[#44403C] dark:text-[#C2BCB2] hover:text-[#18181B] dark:hover:text-[#EFECE6] cursor-pointer"
               >
                 {showPastRounds ? (
                   <ChevronUp className="w-4 h-4" aria-hidden="true" />
@@ -348,10 +534,10 @@ export function TrainingWorkbench({
                   {[...pastRounds].reverse().map((round) => (
                     <div
                       key={round.roundNumber}
-                      className="p-5 rounded-xl bg-[#F3F1EC] dark:bg-[#21201D] border border-[#E5E2DC] dark:border-[#2E2C28] space-y-4"
+                      className="p-5 rounded-xl bg-[#F5F2EC] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E] space-y-4"
                     >
-                      <div className="flex items-center justify-between text-xs text-[#57534E] dark:text-[#A8A29E]">
-                        <span className="font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+                      <div className="flex items-center justify-between text-xs text-[#44403C] dark:text-[#C2BCB2]">
+                        <span className="font-semibold text-[#18181B] dark:text-[#EFECE6]">
                           Rodada {round.roundNumber} · {round.difficultyLabel}
                         </span>
                         <span className="font-mono tabular-nums">
@@ -375,9 +561,15 @@ export function TrainingWorkbench({
                               evaluation={ev}
                               isEvaluated={true}
                               disabled={true}
+                              sessionDiscipline={sessionDiscipline}
+                              isGeneratingComparative={generatingComparativeQuestionId === q.id}
                               onChangeAnswer={() => {}}
                               onSelectOption={() => {}}
                               onSelectConfidence={() => {}}
+                              onSelectErrorCause={(qId, cause) =>
+                                onSelectErrorCause(round.roundNumber, qId, cause)
+                              }
+                              onRequestComparativeTable={onRequestComparativeTable}
                             />
                           );
                         })}
@@ -390,7 +582,8 @@ export function TrainingWorkbench({
           )}
         </div>
 
-        <div className="lg:col-span-4">
+        {/* Desktop Sticky Session Panel */}
+        <div className="hidden lg:block lg:col-span-4">
           <LateralProgressPanel
             session={session}
             onFinishEarly={onFinishEarly}

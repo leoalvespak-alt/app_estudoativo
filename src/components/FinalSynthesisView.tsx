@@ -37,19 +37,19 @@ export function FinalSynthesisView({
   };
 
   const handleDownloadMd = () => {
-    const md = `# ${session.title}\n\n## Síntese Ultracompacta Final\n\n\`\`\`text\n${finalSyn.asciiTree}\n\`\`\`\n\n## Parecer da Sessão\n\n${finalSyn.closingFeedback}\n`;
+    const md = `# ${session.title}\n\n## Árvore Hierárquica da Sessão\n\n\`\`\`text\n${finalSyn.asciiTree}\n\`\`\`\n\n## Parecer da Sessão\n\n${finalSyn.closingFeedback}\n`;
     downloadTextFile(`${slugifyFilename(session.title)}-sintese.md`, md);
   };
 
   return (
-    <section className="max-w-[1100px] mx-auto px-4 sm:px-8 py-10 space-y-8">
-      <div className="bg-white dark:bg-[#1A1917] border border-[#E5E2DC] dark:border-[#2E2C28] rounded-xl p-6 sm:p-10 space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4 pb-6 border-b border-[#E5E2DC] dark:border-[#2E2C28]">
+    <section className="max-w-[1040px] mx-auto px-4 sm:px-8 py-8 sm:py-10 space-y-8">
+      <div className="bg-white dark:bg-[#22201D] border border-[#E5E0D8] dark:border-[#36332E] rounded-xl p-6 sm:p-10 space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4 pb-6 border-b border-[#E5E0D8] dark:border-[#36332E]">
           <div className="space-y-1">
             <p className="text-xs font-medium text-[#047857] dark:text-[#34D399]">
-              Treino Concluído · Síntese salva na nuvem para @{session.ownerUsername}
+              Treino concluído · Árvore salva na Biblioteca de {session.ownerUsername}
             </p>
-            <h1 className="font-display text-2xl sm:text-3xl font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+            <h1 className="font-display text-2xl sm:text-3xl font-semibold text-[#18181B] dark:text-[#EFECE6]">
               {session.title}
             </h1>
           </div>
@@ -58,7 +58,7 @@ export function FinalSynthesisView({
             <button
               type="button"
               onClick={onOpenLibrary}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#D6D3CD] dark:border-[#3A3732] bg-[#FAF9F6] dark:bg-[#141311] text-sm font-medium text-[#18181B] dark:text-[#F4F2ED] hover:border-[#18181B] dark:hover:border-[#F4F2ED] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#D6D0C6] dark:border-[#45413B] bg-[#FAF8F5] dark:bg-[#1C1B19] text-sm font-medium text-[#18181B] dark:text-[#EFECE6] hover:border-[#B45309] dark:hover:border-[#F59E0B] transition-colors cursor-pointer"
             >
               <BookMarked className="w-4 h-4" aria-hidden="true" />
               <span>Abrir Biblioteca</span>
@@ -66,7 +66,7 @@ export function FinalSynthesisView({
             <button
               type="button"
               onClick={onStartNewTraining}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#B45309] dark:bg-[#D97706] text-white text-sm font-semibold hover:bg-[#92400E] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#B45309] dark:bg-[#F59E0B] text-[#FAF8F5] dark:text-[#141312] text-sm font-semibold hover:bg-[#92400E] dark:hover:bg-[#FBBF24] transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
               <span>Novo Treino</span>
@@ -75,33 +75,33 @@ export function FinalSynthesisView({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-lg bg-[#FAF9F6] dark:bg-[#141311] border border-[#E5E2DC] dark:border-[#2E2C28]">
-            <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">Rodadas concluídas</p>
-            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#18181B] dark:text-[#F4F2ED]">
+          <div className="p-4 rounded-lg bg-[#FAF8F5] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E]">
+            <p className="text-xs text-[#44403C] dark:text-[#C2BCB2]">Rodadas concluídas</p>
+            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#18181B] dark:text-[#EFECE6]">
               {session.rounds.filter((r) => r.evaluations.length > 0).length}
             </p>
           </div>
-          <div className="p-4 rounded-lg bg-[#FAF9F6] dark:bg-[#141311] border border-[#E5E2DC] dark:border-[#2E2C28]">
-            <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">Subtópicos trabalhados</p>
-            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#18181B] dark:text-[#F4F2ED]">
+          <div className="p-4 rounded-lg bg-[#FAF8F5] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E]">
+            <p className="text-xs text-[#44403C] dark:text-[#C2BCB2]">Subtópicos trabalhados</p>
+            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#18181B] dark:text-[#EFECE6]">
               {finalSyn.topicsCoveredCount}
             </p>
           </div>
-          <div className="p-4 rounded-lg bg-[#FAF9F6] dark:bg-[#141311] border border-[#E5E2DC] dark:border-[#2E2C28]">
-            <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">
+          <div className="p-4 rounded-lg bg-[#FAF8F5] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E]">
+            <p className="text-xs text-[#44403C] dark:text-[#C2BCB2]">
               Pontos fracos consolidados
             </p>
-            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#B45309] dark:text-[#F59E0B]">
+            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#18181B] dark:text-[#EFECE6]">
               {finalSyn.masteredWeakPointsCount}
             </p>
           </div>
         </div>
 
-        <div className="p-5 rounded-lg bg-[#F3F1EC] dark:bg-[#21201D] border border-[#E5E2DC] dark:border-[#2E2C28]">
-          <p className="text-xs font-semibold text-[#18181B] dark:text-[#F4F2ED]">
+        <div className="p-5 rounded-lg bg-[#F5F2EC] dark:bg-[#1C1B19] border border-[#E5E0D8] dark:border-[#36332E]">
+          <p className="text-xs font-semibold text-[#18181B] dark:text-[#EFECE6]">
             Parecer Final do Treinador
           </p>
-          <p className="mt-1.5 text-sm sm:text-[15px] text-[#18181B] dark:text-[#F4F2ED] leading-relaxed">
+          <p className="mt-1.5 reading-measure text-[#18181B] dark:text-[#EFECE6]">
             {finalSyn.closingFeedback}
           </p>
         </div>
@@ -109,11 +109,11 @@ export function FinalSynthesisView({
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="font-display text-xl font-semibold text-[#18181B] dark:text-[#F4F2ED]">
-                Síntese Ultracompacta Final
+              <h2 className="font-display text-xl font-semibold text-[#18181B] dark:text-[#EFECE6]">
+                Síntese Final em Árvore Hierárquica
               </h2>
-              <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">
-                Árvore hierárquica com raízes em caixa alta, regras, exceções e diferenciais lógicos.
+              <p className="text-xs text-[#44403C] dark:text-[#C2BCB2]">
+                Estrutura organizada em tema central, regras gerais, exceções/prazos e pontos de atenção das rodadas erradas ou chutadas.
               </p>
             </div>
 
@@ -121,7 +121,7 @@ export function FinalSynthesisView({
               <button
                 type="button"
                 onClick={handleCopy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D3CD] dark:border-[#3A3732] bg-white dark:bg-[#141311] text-xs font-medium text-[#18181B] dark:text-[#F4F2ED] hover:border-[#18181B] dark:hover:border-[#F4F2ED] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#1C1B19] text-xs font-medium text-[#18181B] dark:text-[#EFECE6] hover:border-[#B45309] dark:hover:border-[#F59E0B] transition-colors cursor-pointer"
               >
                 {copied ? (
                   <>
@@ -138,7 +138,7 @@ export function FinalSynthesisView({
               <button
                 type="button"
                 onClick={handleDownloadTxt}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D3CD] dark:border-[#3A3732] bg-white dark:bg-[#141311] text-xs font-medium text-[#18181B] dark:text-[#F4F2ED] hover:border-[#18181B] dark:hover:border-[#F4F2ED] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#1C1B19] text-xs font-medium text-[#18181B] dark:text-[#EFECE6] hover:border-[#B45309] dark:hover:border-[#F59E0B] transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>.txt</span>
@@ -146,7 +146,7 @@ export function FinalSynthesisView({
               <button
                 type="button"
                 onClick={handleDownloadMd}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D3CD] dark:border-[#3A3732] bg-white dark:bg-[#141311] text-xs font-medium text-[#18181B] dark:text-[#F4F2ED] hover:border-[#18181B] dark:hover:border-[#F4F2ED] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D0C6] dark:border-[#45413B] bg-white dark:bg-[#1C1B19] text-xs font-medium text-[#18181B] dark:text-[#EFECE6] hover:border-[#B45309] dark:hover:border-[#F59E0B] transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>.md</span>
@@ -154,9 +154,11 @@ export function FinalSynthesisView({
             </div>
           </div>
 
-          <pre className="p-6 rounded-xl bg-[#18181B] dark:bg-[#0B0B0A] border border-transparent dark:border-[#2E2C28] text-[#FAF9F6] font-mono text-xs sm:text-[13px] leading-relaxed overflow-x-auto whitespace-pre">
-            {finalSyn.asciiTree}
-          </pre>
+          <div className="p-5 sm:p-7 rounded-xl bg-[#FAF8F5] dark:bg-[#141312] border border-[#D6D0C6] dark:border-[#36332E] overflow-x-auto">
+            <pre className="max-w-[72ch] font-mono text-xs sm:text-[13.5px] leading-[1.7] text-[#18181B] dark:text-[#EFECE6] whitespace-pre-wrap break-words">
+              {finalSyn.asciiTree}
+            </pre>
+          </div>
         </div>
       </div>
     </section>
