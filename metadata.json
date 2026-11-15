@@ -1,0 +1,6 @@
+{
+  "name": "Caderno Ativo — Treinador de Revisão",
+  "description": "Aplicativo de treino ativo e revisão guiada com rodadas progressivas de perguntas diretas, persistência em pontos fracos, sínteses estratégicas e árvore de conhecimento ASCII.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

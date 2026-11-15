@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuario identificado apenas por nome de usuario sem senha.",
+      "type": "object",
+      "properties": {
+        "usernameKey": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9._-]+$",
+          "description": "Identificador unico normalizado em minusculas."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40,
+          "description": "Nome de exibicao escolhido pelo usuario."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp do servidor na criacao do perfil."
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp do servidor do ultimo acesso."
+        }
+      },
+      "required": ["usernameKey", "displayName", "createdAt", "lastActiveAt"]
+    },
+    "TrainingSession": {
+      "title": "TrainingSession",
+      "description": "Sessao de treino ativo armazenada na subcolecao do usuario no Firestore.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ownerUsername": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9._-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["topic", "text", "git_kb"]
+        },
+        "sourceContent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "selectedKbPaths": {
+          "type": "array"
+        },
+        "kbSources": {
+          "type": "array"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["choice_gate", "prep_class", "in_progress", "overtime", "completed"]
+        },
+        "wantsPrepClass": {
+          "type": "boolean"
+        },
+        "currentRound": {
+          "type": "integer"
+        },
+        "syllabus": {
+          "type": "array"
+        },
+        "prepClass": {
+          "type": "object"
+        },
+        "rounds": {
+          "type": "array"
+        },
+        "activeWeakPoints": {
+          "type": "array"
+        },
+        "strategicSyntheses": {
+          "type": "array"
+        },
+        "finalSynthesis": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUsername",
+        "title",
+        "sourceType",
+        "sourceContent",
+        "status",
+        "wantsPrepClass",
+        "currentRound",
+        "syllabus",
+        "rounds",
+        "activeWeakPoints",
+        "strategicSyntheses",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{usernameKey}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Perfis individuais identificados apenas por nome de usuario normalizado."
+    },
+    "/users/{usernameKey}/sessions/{sessionId}": {
+      "schema": {
+        "$ref": "#/entities/TrainingSession"
+      },
+      "description": "Historico e progresso em nuvem das sessoes de treino ativo isoladas por usuario."
+    }
+  }
+}

@@ -1,0 +1,185 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidUsernameKey(key) {
+      return key is string && key.size() >= 3 && key.size() <= 32 && key.matches('^[a-z0-9._-]+$');
+    }
+
+    function isValidUserProfile(data, usernameKey) {
+      return data.keys().hasAll(['usernameKey', 'displayName', 'createdAt', 'lastActiveAt'])
+        && data.keys().hasOnly(['usernameKey', 'displayName', 'createdAt', 'lastActiveAt'])
+        && data.usernameKey == usernameKey
+        && isValidUsernameKey(data.usernameKey)
+        && data.displayName is string
+        && data.displayName.size() >= 3
+        && data.displayName.size() <= 40
+        && data.createdAt is timestamp
+        && data.lastActiveAt is timestamp;
+    }
+
+    function isValidOptionalMap(data, key) {
+      return !(key in data) || data[key] == null || data[key] is map;
+    }
+
+    function isValidOptionalStringList(data, key, maxLen) {
+      return !(key in data)
+        || (data[key] is list && data[key].size() <= maxLen && (data[key].size() == 0 || data[key][0] is string));
+    }
+
+    function isValidOptionalMapList(data, key, maxLen) {
+      return !(key in data)
+        || (data[key] is list && data[key].size() <= maxLen && (data[key].size() == 0 || data[key][0] is map));
+    }
+
+    function isValidTrainingSession(data, usernameKey, sessionId) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUsername',
+          'title',
+          'sourceType',
+          'sourceContent',
+          'status',
+          'wantsPrepClass',
+          'currentRound',
+          'syllabus',
+          'rounds',
+          'activeWeakPoints',
+          'strategicSyntheses',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'ownerUsername',
+          'title',
+          'sourceType',
+          'sourceContent',
+          'selectedKbPaths',
+          'kbSources',
+          'status',
+          'wantsPrepClass',
+          'currentRound',
+          'syllabus',
+          'prepClass',
+          'rounds',
+          'activeWeakPoints',
+          'strategicSyntheses',
+          'finalSynthesis',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id == sessionId
+        && isValidId(data.id)
+        && data.ownerUsername == usernameKey
+        && isValidUsernameKey(data.ownerUsername)
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 160
+        && data.sourceType in ['topic', 'text', 'git_kb']
+        && data.sourceContent is string
+        && data.sourceContent.size() >= 1
+        && data.sourceContent.size() <= 20000
+        && isValidOptionalStringList(data, 'selectedKbPaths', 20)
+        && isValidOptionalMapList(data, 'kbSources', 20)
+        && data.status in ['choice_gate', 'prep_class', 'in_progress', 'overtime', 'completed']
+        && data.wantsPrepClass is bool
+        && data.currentRound is int
+        && data.currentRound >= 1
+        && data.currentRound <= 30
+        && data.syllabus is list
+        && data.syllabus.size() <= 10
+        && (data.syllabus.size() == 0 || data.syllabus[0] is map)
+        && data.rounds is list
+        && data.rounds.size() <= 30
+        && (data.rounds.size() == 0 || data.rounds[0] is map)
+        && data.activeWeakPoints is list
+        && data.activeWeakPoints.size() <= 100
+        && (data.activeWeakPoints.size() == 0 || data.activeWeakPoints[0] is map)
+        && data.strategicSyntheses is list
+        && data.strategicSyntheses.size() <= 5
+        && (data.strategicSyntheses.size() == 0 || data.strategicSyntheses[0] is map)
+        && isValidOptionalMap(data, 'prepClass')
+        && isValidOptionalMap(data, 'finalSynthesis')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{usernameKey} {
+      allow get: if isValidUsernameKey(usernameKey);
+      allow list: if false;
+
+      allow create: if isValidUsernameKey(usernameKey)
+        && isValidUserProfile(incoming(), usernameKey)
+        && incoming().createdAt == request.time
+        && incoming().lastActiveAt == request.time;
+
+      allow update: if isValidUsernameKey(usernameKey)
+        && isValidUserProfile(incoming(), usernameKey)
+        && incoming().usernameKey == existing().usernameKey
+        && incoming().createdAt == existing().createdAt
+        && incoming().lastActiveAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'lastActiveAt']);
+
+      allow delete: if false;
+
+      match /sessions/{sessionId} {
+        allow get: if isValidUsernameKey(usernameKey)
+          && isValidId(sessionId);
+
+        allow list: if isValidUsernameKey(usernameKey)
+          && resource.data.ownerUsername == usernameKey;
+
+        allow create: if isValidUsernameKey(usernameKey)
+          && isValidId(sessionId)
+          && isValidTrainingSession(incoming(), usernameKey, sessionId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(usernameKey));
+
+        allow update: if isValidUsernameKey(usernameKey)
+          && isValidId(sessionId)
+          && isValidTrainingSession(incoming(), usernameKey, sessionId)
+          && incoming().id == existing().id
+          && incoming().ownerUsername == existing().ownerUsername
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && existing().status != 'completed'
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title',
+            'kbSources',
+            'status',
+            'wantsPrepClass',
+            'currentRound',
+            'syllabus',
+            'prepClass',
+            'rounds',
+            'activeWeakPoints',
+            'strategicSyntheses',
+            'finalSynthesis',
+            'updatedAt'
+          ]);
+
+        allow delete: if isValidUsernameKey(usernameKey)
+          && isValidId(sessionId);
+      }
+    }
+  }
+}
