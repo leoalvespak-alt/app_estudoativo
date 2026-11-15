@@ -39,6 +39,10 @@ service cloud.firestore {
       return !(key in data) || data[key] == null || data[key] is map;
     }
 
+    function isValidOptionalString(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
     function isValidOptionalStringList(data, key, maxLen) {
       return !(key in data)
         || (data[key] is list && data[key].size() <= maxLen && (data[key].size() == 0 || data[key][0] is string));
@@ -70,6 +74,7 @@ service cloud.firestore {
           'id',
           'ownerUsername',
           'title',
+          'discipline',
           'sourceType',
           'sourceContent',
           'selectedKbPaths',
@@ -93,7 +98,8 @@ service cloud.firestore {
         && data.title is string
         && data.title.size() >= 1
         && data.title.size() <= 160
-        && data.sourceType in ['topic', 'text', 'git_kb']
+        && isValidOptionalString(data, 'discipline', 100)
+        && data.sourceType in ['topic', 'text', 'git_kb', 'weak_points']
         && data.sourceContent is string
         && data.sourceContent.size() >= 1
         && data.sourceContent.size() <= 20000
@@ -118,6 +124,75 @@ service cloud.firestore {
         && (data.strategicSyntheses.size() == 0 || data.strategicSyntheses[0] is map)
         && isValidOptionalMap(data, 'prepClass')
         && isValidOptionalMap(data, 'finalSynthesis')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWeakPointBankEntry(data, usernameKey, weakPointId) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUsername',
+          'discipline',
+          'concept',
+          'definition',
+          'subtopic',
+          'sourceSessionId',
+          'sourceSessionTitle',
+          'status',
+          'lastTrigger',
+          'errorCount',
+          'guessCount',
+          'retestSuccessCount',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'ownerUsername',
+          'discipline',
+          'concept',
+          'definition',
+          'subtopic',
+          'sourceSessionId',
+          'sourceSessionTitle',
+          'status',
+          'lastTrigger',
+          'errorCount',
+          'guessCount',
+          'retestSuccessCount',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id == weakPointId
+        && isValidId(data.id)
+        && data.ownerUsername == usernameKey
+        && isValidUsernameKey(data.ownerUsername)
+        && data.discipline is string
+        && data.discipline.size() >= 1
+        && data.discipline.size() <= 100
+        && data.concept is string
+        && data.concept.size() >= 1
+        && data.concept.size() <= 240
+        && data.definition is string
+        && data.definition.size() <= 2000
+        && data.subtopic is string
+        && data.subtopic.size() <= 240
+        && data.sourceSessionId is string
+        && isValidId(data.sourceSessionId)
+        && data.sourceSessionTitle is string
+        && data.sourceSessionTitle.size() >= 1
+        && data.sourceSessionTitle.size() <= 160
+        && data.status in ['active', 'mastered']
+        && data.lastTrigger in ['incorrect', 'partial', 'lucky_guess', 'unsure_hit']
+        && data.errorCount is int
+        && data.errorCount >= 0
+        && data.errorCount <= 10000
+        && data.guessCount is int
+        && data.guessCount >= 0
+        && data.guessCount <= 10000
+        && data.retestSuccessCount is int
+        && data.retestSuccessCount >= 0
+        && data.retestSuccessCount <= 10000
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -164,6 +239,7 @@ service cloud.firestore {
           && existing().status != 'completed'
           && incoming().diff(existing()).affectedKeys().hasOnly([
             'title',
+            'discipline',
             'kbSources',
             'status',
             'wantsPrepClass',
@@ -179,6 +255,46 @@ service cloud.firestore {
 
         allow delete: if isValidUsernameKey(usernameKey)
           && isValidId(sessionId);
+      }
+
+      match /weakPoints/{weakPointId} {
+        allow get: if isValidUsernameKey(usernameKey)
+          && isValidId(weakPointId);
+
+        allow list: if isValidUsernameKey(usernameKey)
+          && resource.data.ownerUsername == usernameKey;
+
+        allow create: if isValidUsernameKey(usernameKey)
+          && isValidId(weakPointId)
+          && isValidWeakPointBankEntry(incoming(), usernameKey, weakPointId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(usernameKey));
+
+        allow update: if isValidUsernameKey(usernameKey)
+          && isValidId(weakPointId)
+          && isValidWeakPointBankEntry(incoming(), usernameKey, weakPointId)
+          && incoming().id == existing().id
+          && incoming().ownerUsername == existing().ownerUsername
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'discipline',
+            'concept',
+            'definition',
+            'subtopic',
+            'sourceSessionId',
+            'sourceSessionTitle',
+            'status',
+            'lastTrigger',
+            'errorCount',
+            'guessCount',
+            'retestSuccessCount',
+            'updatedAt'
+          ]);
+
+        allow delete: if isValidUsernameKey(usernameKey)
+          && isValidId(weakPointId);
       }
     }
   }

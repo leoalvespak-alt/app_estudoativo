@@ -212,14 +212,15 @@ app.get('/api/kb/document', async (req, res) => {
   }
 });
 
-// 1. Initialize session: generate title, 10-round syllabus, and optional concise prep class
+// 1. Initialize session: generate title, discipline, 10-round syllabus, and optional concise prep class
 app.post('/api/trainer/init', async (req, res) => {
   try {
-    const { sourceType, sourceContent, selectedKbPaths, wantsPrepClass } = req.body as {
+    const { sourceType, sourceContent, selectedKbPaths, wantsPrepClass, disciplineHint } = req.body as {
       sourceType: SourceType;
       sourceContent: string;
       selectedKbPaths?: string[];
       wantsPrepClass: boolean;
+      disciplineHint?: string;
     };
 
     if (!sourceContent?.trim() && (!selectedKbPaths || selectedKbPaths.length === 0)) {
@@ -242,14 +243,24 @@ app.post('/api/trainer/init', async (req, res) => {
 
     const allSources: KbSourceRef[] = [...kb.sources, ...webFallback.webSources];
 
+    const kbDisciplineCandidate =
+      disciplineHint?.trim() ||
+      kb.sources.find(
+        (s) => s.origin === 'git' && s.discipline && s.discipline !== 'Legislação Seca'
+      )?.discipline ||
+      '';
+
     const prompt = `Analise o escopo de estudo abaixo e crie o planejamento completo de 10 rodadas progressivas.
 Tipo de entrada: ${
-      sourceType === 'git_kb'
-        ? 'Base Git Concursos (rota-base-conhecimento-estudos)'
-        : sourceType === 'text'
-          ? 'Texto base / anotações fornecidas pelo aluno'
-          : 'Tema livre'
+      sourceType === 'weak_points'
+        ? 'Treino Sob Demanda — Consolidação de Pontos Fracos e Chutes por Disciplina'
+        : sourceType === 'git_kb'
+          ? 'Base Git Concursos (rota-base-conhecimento-estudos)'
+          : sourceType === 'text'
+            ? 'Texto base / anotações fornecidas pelo aluno'
+            : 'Tema livre'
     }
+${kbDisciplineCandidate ? `Disciplina sugerida pela base: ${kbDisciplineCandidate}` : ''}
 Pedido/Tema do aluno:
 """
 ${sourceContent.trim()}
@@ -287,6 +298,11 @@ ${
               title: {
                 type: Type.STRING,
                 description: 'Título curto e editorial para o caderno de estudo (máx. 60 caracteres).',
+              },
+              discipline: {
+                type: Type.STRING,
+                description:
+                  'Nome curto e padronizado da disciplina principal em português (ex.: Direito Tributário, Direito Administrativo, Direito Constitucional, Direito Penal, Contabilidade Geral, Auditoria, Raciocínio Lógico, Língua Portuguesa).',
               },
               syllabus: {
                 type: Type.ARRAY,
@@ -329,7 +345,7 @@ ${
                 required: ['summary', 'concepts', 'studyTips'],
               },
             },
-            required: ['title', 'syllabus', 'prepClass'],
+            required: ['title', 'discipline', 'syllabus', 'prepClass'],
           },
         },
       })
@@ -337,6 +353,7 @@ ${
 
     const parsed = JSON.parse((response.text ?? '{}').trim()) as {
       title: string;
+      discipline: string;
       syllabus: Array<{
         roundNumber: number;
         title: string;
@@ -371,6 +388,7 @@ ${
 
     res.json({
       title: parsed.title || sourceContent.slice(0, 50),
+      discipline: (parsed.discipline || kbDisciplineCandidate || 'Conhecimentos Gerais').slice(0, 100),
       syllabus,
       prepClass,
       kbSources: allSources,
@@ -687,7 +705,7 @@ ${
     : ''
 }
 
-Perguntas e Respostas do Aluno:
+Perguntas, Respostas e Confiança Declarada do Aluno:
 ${JSON.stringify(
   questions.map((q) => ({
     questionId: q.id,
@@ -699,6 +717,7 @@ ${JSON.stringify(
     options: q.options,
     userSelectedOption: q.userSelectedOption,
     userAnswer: q.userAnswer,
+    confidence: q.confidence || 'certain',
   })),
   null,
   2
@@ -707,10 +726,11 @@ ${JSON.stringify(
 Instruções de correção:
 - Para questões "multiple_choice": compare "userSelectedOption" com a alternativa verdadeiramente correta dentre A, B, C, D, E; informe "correctOption" com a letra correta ("A".."E"); classifique "verdict" como "correct" se acertou ou "incorrect" se errou, e explique objetivamente por que a correta é válida e por que a escolhida (se errada) falha.
 - Para questões "open": preencha "correctOption" com ""; classifique "verdict" como "correct", "partial" ou "incorrect"; explique objetivamente o que acertou, o que faltou ou qual foi a pegadinha.
+- Calibração de confiança: observe "confidence" ("certain" = Certeza, "unsure" = Dúvida, "guess" = Chute). Se acertou com "guess", reforce a explicação da regra para transformar o chute em retenção real; se errou com "certain", aponte exatamente a confusão conceitual que gerou falsa segurança.
 - Preencha "expectedAnswer" com a resposta completa esperada de forma concisa.
 - REGRA DE DEFINIÇÃO: Em "conceptDefinition", forneça uma definição objetiva e direta do termo técnico ou conceito central tratado na questão (nunca apenas uma listagem seca), ancorada na Base Git sempre que disponível.
-- Defina "weakPointTriggered": true sempre que o verdict for "partial" ou "incorrect".
-- Escreva "roundSummary" com uma síntese curta (1 a 2 frases) do desempenho nesta rodada.`;
+- Defina "weakPointTriggered": true sempre que o verdict for "partial" ou "incorrect" OU quando acertar no "guess" (chute).
+- Escreva "roundSummary" com uma síntese curta (1 a 2 frases) do desempenho nesta rodada (mencionando chutes ou erros de alta confiança se houver).`;
 
     const response = await withRetry(() =>
       ai.models.generateContent({
@@ -766,8 +786,22 @@ Instruções de correção:
       roundSummary: string;
     };
 
+    const enrichedEvaluations: QuestionEvaluation[] = (parsed.evaluations || []).map((ev) => {
+      const q = questions.find((item) => item.id === ev.questionId);
+      const conf = q?.confidence || '';
+      const isLuckyGuess = ev.verdict === 'correct' && conf === 'guess';
+      const isConfidentError = ev.verdict !== 'correct' && conf === 'certain';
+      return {
+        ...ev,
+        confidenceAtSubmit: conf,
+        isLuckyGuess,
+        isConfidentError,
+        weakPointTriggered: ev.verdict !== 'correct' || isLuckyGuess,
+      };
+    });
+
     res.json({
-      evaluations: parsed.evaluations || [],
+      evaluations: enrichedEvaluations,
       roundSummary: parsed.roundSummary || '',
     });
   } catch (error) {

@@ -67,6 +67,7 @@ export async function fetchKbDocumentPreview(rawPath: string): Promise<{
 
 export interface InitTrainerResult {
   title: string;
+  discipline: string;
   syllabus: SyllabusRoundPlan[];
   prepClass: PrepClassContent | null;
   kbSources: KbSourceRef[];
@@ -77,6 +78,7 @@ export function initTrainerSession(params: {
   sourceContent: string;
   selectedKbPaths?: string[];
   wantsPrepClass: boolean;
+  disciplineHint?: string;
 }): Promise<InitTrainerResult> {
   return postJson<InitTrainerResult>('/api/trainer/init', params);
 }

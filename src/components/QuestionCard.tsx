@@ -1,5 +1,6 @@
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Dices, HelpCircle, ShieldCheck, XCircle } from 'lucide-react';
 import type {
+  ConfidenceLevel,
   OptionLetter,
   QuestionEvaluation,
   TrainerQuestion,
@@ -14,8 +15,25 @@ interface QuestionCardProps {
   disabled: boolean;
   onChangeAnswer: (questionId: string, value: string) => void;
   onSelectOption: (questionId: string, option: OptionLetter) => void;
+  onSelectConfidence: (questionId: string, confidence: ConfidenceLevel) => void;
   onShortcutSubmit?: () => void;
 }
+
+const CONFIDENCE_OPTIONS: Array<{
+  value: ConfidenceLevel;
+  label: string;
+  Icon: typeof ShieldCheck;
+}> = [
+  { value: 'certain', label: 'Certeza', Icon: ShieldCheck },
+  { value: 'unsure', label: 'Dúvida', Icon: HelpCircle },
+  { value: 'guess', label: 'Chute', Icon: Dices },
+];
+
+const CONFIDENCE_LABELS: Record<ConfidenceLevel, string> = {
+  certain: 'Certeza',
+  unsure: 'Dúvida',
+  guess: 'Chute',
+};
 
 const VERDICT_META: Record<
   Verdict,
@@ -52,12 +70,48 @@ export function QuestionCard({
   disabled,
   onChangeAnswer,
   onSelectOption,
+  onSelectConfidence,
   onShortcutSubmit,
 }: QuestionCardProps) {
-  const verdictMeta = evaluation ? VERDICT_META[evaluation.verdict] : null;
-  const VerdictIcon = verdictMeta?.Icon;
   const isMultipleChoice =
     question.format === 'multiple_choice' && question.options.length > 0;
+
+  const submittedConfidence = (evaluation?.confidenceAtSubmit ||
+    question.confidence ||
+    '') as ConfidenceLevel | '';
+  const isLuckyGuess =
+    Boolean(evaluation?.isLuckyGuess) ||
+    (evaluation?.verdict === 'correct' && submittedConfidence === 'guess');
+  const isConfidentError =
+    Boolean(evaluation?.isConfidentError) ||
+    (evaluation !== undefined &&
+      evaluation.verdict !== 'correct' &&
+      submittedConfidence === 'certain');
+
+  const baseVerdictMeta = evaluation ? VERDICT_META[evaluation.verdict] : null;
+  let verdictLabel = baseVerdictMeta?.label || '';
+  let verdictColorClass = baseVerdictMeta?.colorClass || '';
+  let verdictBgClass = baseVerdictMeta?.bgClass || '';
+  let VerdictIcon = baseVerdictMeta?.Icon;
+
+  if (evaluation && isLuckyGuess) {
+    verdictLabel = 'Acerto por chute · Entra em reforço';
+    verdictColorClass = 'text-[#B45309] dark:text-[#FBBF24]';
+    verdictBgClass =
+      'bg-amber-50/70 dark:bg-amber-950/35 border-amber-200 dark:border-amber-800/70';
+    VerdictIcon = AlertTriangle;
+  } else if (
+    evaluation &&
+    evaluation.verdict === 'correct' &&
+    submittedConfidence === 'unsure'
+  ) {
+    verdictLabel = 'Correto (com dúvida)';
+  } else if (evaluation && isConfidentError) {
+    verdictLabel =
+      evaluation.verdict === 'partial'
+        ? 'Parcial com alta confiança · Entra em reteste'
+        : 'Incorreto com certeza · Armadilha conceitual';
+  }
 
   return (
     <article className="bg-white dark:bg-[#1A1917] border border-[#E5E2DC] dark:border-[#2E2C28] rounded-xl p-6 transition-colors">
@@ -79,6 +133,12 @@ export function QuestionCard({
             {question.isRetest ? 'Reteste de ponto fraco' : 'Tópico novo'}
           </span>
         </div>
+
+        {isEvaluated && submittedConfidence && (
+          <span className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">
+            Confiança: {CONFIDENCE_LABELS[submittedConfidence]}
+          </span>
+        )}
       </div>
 
       <h3 className="mt-3 text-base sm:text-[17px] font-medium text-[#18181B] dark:text-[#F4F2ED] leading-relaxed">
@@ -86,7 +146,11 @@ export function QuestionCard({
       </h3>
 
       {isMultipleChoice ? (
-        <div className="mt-4 space-y-2.5" role="radiogroup" aria-label={`Alternativas da pergunta ${index + 1}`}>
+        <div
+          className="mt-4 space-y-2.5"
+          role="radiogroup"
+          aria-label={`Alternativas da pergunta ${index + 1}`}
+        >
           {question.options.map((opt) => {
             const isSelected = question.userSelectedOption === opt.label;
             const isCorrectOption =
@@ -188,11 +252,50 @@ export function QuestionCard({
         </div>
       )}
 
-      {isEvaluated && evaluation && verdictMeta && VerdictIcon && (
-        <div className={`mt-4 p-4 rounded-lg border space-y-3 ${verdictMeta.bgClass}`}>
-          <div className={`flex items-center gap-2 text-sm font-semibold ${verdictMeta.colorClass}`}>
+      {!isEvaluated && (
+        <div className="mt-4 pt-3 border-t border-[#E5E2DC] dark:border-[#2E2C28] flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">
+            Grau de confiança nesta resposta:
+          </span>
+          <div
+            role="radiogroup"
+            aria-label={`Confiança na pergunta ${index + 1}`}
+            className="inline-flex items-center gap-1 p-1 rounded-lg bg-[#F3F1EC] dark:bg-[#21201D] border border-[#E5E2DC] dark:border-[#2E2C28]"
+          >
+            {CONFIDENCE_OPTIONS.map(({ value, label, Icon }) => {
+              const active = question.confidence === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={disabled}
+                  onClick={() => onSelectConfidence(question.id, value)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
+                    active
+                      ? value === 'guess'
+                        ? 'bg-[#B45309] dark:bg-[#D97706] text-white'
+                        : value === 'unsure'
+                          ? 'bg-[#18181B] dark:bg-[#F4F2ED] text-[#FAF9F6] dark:text-[#111110]'
+                          : 'bg-[#047857] text-white'
+                      : 'text-[#57534E] dark:text-[#A8A29E] hover:text-[#18181B] dark:hover:text-[#F4F2ED]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {isEvaluated && evaluation && VerdictIcon && (
+        <div className={`mt-4 p-4 rounded-lg border space-y-3 ${verdictBgClass}`}>
+          <div className={`flex items-center gap-2 text-sm font-semibold ${verdictColorClass}`}>
             <VerdictIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <span>{verdictMeta.label}</span>
+            <span>{verdictLabel}</span>
           </div>
 
           <p className="text-sm text-[#18181B] dark:text-[#F4F2ED] leading-relaxed">

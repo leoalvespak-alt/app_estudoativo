@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronUp, Loader2, Send } from 'lucide-react';
-import type { OptionLetter, StrategicSynthesis, TrainingSession } from '../types/trainer';
+import type {
+  ConfidenceLevel,
+  OptionLetter,
+  StrategicSynthesis,
+  TrainingSession,
+} from '../types/trainer';
 import { QuestionCard } from './QuestionCard';
 import { LateralProgressPanel } from './LateralProgressPanel';
 
@@ -11,6 +16,11 @@ interface TrainingWorkbenchProps {
     roundNumber: number,
     questionId: string,
     option: OptionLetter
+  ) => void;
+  onSelectConfidence: (
+    roundNumber: number,
+    questionId: string,
+    confidence: ConfidenceLevel
   ) => void;
   onSubmitRound: () => void;
   onAdvanceRound: () => void;
@@ -84,6 +94,7 @@ export function TrainingWorkbench({
   session,
   onChangeAnswer,
   onSelectOption,
+  onSelectConfidence,
   onSubmitRound,
   onAdvanceRound,
   onFinishEarly,
@@ -102,13 +113,18 @@ export function TrainingWorkbench({
   }
 
   const isEvaluated = activeRound.evaluations.length > 0;
-  const allAnswered = activeRound.questions.every((q) =>
-    q.format === 'multiple_choice' && q.options.length > 0
-      ? Boolean(q.userSelectedOption)
-      : q.userAnswer.trim().length > 0
-  );
+  const allAnswered = activeRound.questions.every((q) => {
+    const hasAnswer =
+      q.format === 'multiple_choice' && q.options.length > 0
+        ? Boolean(q.userSelectedOption)
+        : q.userAnswer.trim().length > 0;
+    return hasAnswer && Boolean(q.confidence);
+  });
   const roundErrorsCount = activeRound.evaluations.filter(
-    (e) => e.verdict !== 'correct'
+    (e) => e.verdict !== 'correct' || e.weakPointTriggered
+  ).length;
+  const luckyGuessesInRound = activeRound.evaluations.filter(
+    (e) => e.isLuckyGuess
   ).length;
 
   const latestSynthesis =
@@ -209,6 +225,9 @@ export function TrainingWorkbench({
                   onSelectOption={(qId, opt) =>
                     onSelectOption(activeRound.roundNumber, qId, opt)
                   }
+                  onSelectConfidence={(qId, conf) =>
+                    onSelectConfidence(activeRound.roundNumber, qId, conf)
+                  }
                   onShortcutSubmit={() => {
                     if (!isEvaluated && allAnswered && !isSubmitting) {
                       onSubmitRound();
@@ -227,13 +246,18 @@ export function TrainingWorkbench({
               <p className="text-sm text-[#57534E] dark:text-[#A8A29E] leading-relaxed">
                 {activeRound.roundSummary}
               </p>
+              {luckyGuessesInRound > 0 && (
+                <p className="text-xs font-medium text-[#B45309] dark:text-[#F59E0B]">
+                  Filtro de chutes: {luckyGuessesInRound} acerto(s) marcado(s) como chute foram encaminhados para reforço.
+                </p>
+              )}
               {isRound10 && (
                 <p className="text-xs font-medium text-[#B45309] dark:text-[#F59E0B] pt-1">
                   {roundErrorsCount >= 2
-                    ? `Foram identificados ${roundErrorsCount} desvios na Rodada 10. Conforme a regra do treino, iniciaremos uma prorrogação curta exclusiva para consolidá-los.`
+                    ? `Foram identificados ${roundErrorsCount} ponto(s) frágil(is) na Rodada 10 (erros ou chutes). Conforme a regra do treino, iniciaremos uma prorrogação curta exclusiva para consolidá-los.`
                     : roundErrorsCount === 1
                       ? 'Apenas 1 desvio na Rodada 10. Você atingiu o critério de conclusão e já pode gerar sua Síntese Ultracompacta Final.'
-                      : 'Desempenho integral na Rodada 10. Você já pode concluir o treino e gerar sua Síntese Ultracompacta Final.'}
+                      : 'Desempenho integral com certeza na Rodada 10. Você já pode concluir o treino e gerar sua Síntese Ultracompacta Final.'}
                 </p>
               )}
             </div>
@@ -243,7 +267,7 @@ export function TrainingWorkbench({
             {!isEvaluated ? (
               <>
                 <p className="text-xs text-[#57534E] dark:text-[#A8A29E]">
-                  Responda todas as perguntas antes de enviar. Pressione{' '}
+                  Responda e marque o nível de confiança em todas as perguntas antes de enviar. Pressione{' '}
                   <kbd className="px-1.5 py-0.5 rounded border border-[#D6D3CD] dark:border-[#3A3732] bg-white dark:bg-[#1A1917] font-mono text-[11px]">
                     Ctrl/Cmd + Enter
                   </kbd>{' '}
@@ -353,6 +377,7 @@ export function TrainingWorkbench({
                               disabled={true}
                               onChangeAnswer={() => {}}
                               onSelectOption={() => {}}
+                              onSelectConfidence={() => {}}
                             />
                           );
                         })}

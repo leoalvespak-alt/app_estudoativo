@@ -14,6 +14,7 @@ import { TrainingWorkbench } from './components/TrainingWorkbench';
 import { FinalSynthesisView } from './components/FinalSynthesisView';
 import { SynthesisLibraryView } from './components/SynthesisLibraryView';
 import { HistoryView } from './components/HistoryView';
+import { ProgressView } from './components/ProgressView';
 import {
   evaluateRound,
   finalizeTrainerSession,
@@ -25,11 +26,16 @@ import {
   createCloudSession,
   createUserProfile,
   deleteCloudSession,
+  deleteWeakPointBankEntry,
   getUserProfile,
   subscribeUserSessions,
+  subscribeUserWeakPoints,
+  syncRoundWeakPointsToBank,
+  toggleWeakPointStatus,
   touchUserProfile,
   updateCloudSession,
 } from './lib/firestoreStore';
+import type { MergedWeakPointItem } from './lib/progressAnalytics';
 import {
   getStoredThemeMode,
   getStoredUsername,
@@ -37,6 +43,7 @@ import {
   setStoredUsername,
 } from './lib/storage';
 import type {
+  ConfidenceLevel,
   KbSourceRef,
   OptionLetter,
   RoundRecord,
@@ -45,6 +52,7 @@ import type {
   TrainingSession,
   UserProfile,
   WeakPoint,
+  WeakPointBankEntry,
 } from './types/trainer';
 
 function mergeKbSources(
@@ -79,6 +87,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
+  const [weakPointsBank, setWeakPointsBank] = useState<WeakPointBankEntry[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [route, setRoute] = useState<AppRoute>('trainer');
@@ -86,6 +95,7 @@ export default function App() {
     sourceType: SourceType;
     sourceContent: string;
     selectedKbPaths: string[];
+    disciplineHint?: string;
   } | null>(null);
 
   const [isInitializing, setIsInitializing] = useState(false);
@@ -149,17 +159,18 @@ export default function App() {
     };
   }, []);
 
-  // 3. Subscribe to current user's Firestore sessions
+  // 3. Subscribe to current user's Firestore sessions and weak-points bank
   useEffect(() => {
     if (!currentUser) {
       setSessions([]);
+      setWeakPointsBank([]);
       setActiveSessionId(null);
       setIsLoadingSessions(false);
       return;
     }
 
     setIsLoadingSessions(true);
-    const unsubscribe = subscribeUserSessions(
+    const unsubSessions = subscribeUserSessions(
       currentUser.usernameKey,
       (cloudSessions) => {
         setSessions(cloudSessions);
@@ -171,8 +182,19 @@ export default function App() {
       }
     );
 
+    const unsubWeakPoints = subscribeUserWeakPoints(
+      currentUser.usernameKey,
+      (entries) => {
+        setWeakPointsBank(entries);
+      },
+      (msg) => {
+        setErrorMessage(msg);
+      }
+    );
+
     return () => {
-      unsubscribe();
+      unsubSessions();
+      unsubWeakPoints();
     };
   }, [currentUser]);
 
@@ -235,6 +257,7 @@ export default function App() {
     setStoredUsername(null);
     setCurrentUser(null);
     setSessions([]);
+    setWeakPointsBank([]);
     setActiveSessionId(null);
     setPendingScope(null);
     setErrorMessage(null);
@@ -286,6 +309,7 @@ export default function App() {
         sourceContent: pendingScope.sourceContent,
         selectedKbPaths: pendingScope.selectedKbPaths,
         wantsPrepClass,
+        disciplineHint: pendingScope.disciplineHint,
       });
 
       const initialSources = mergeKbSources([], initData.kbSources);
@@ -294,6 +318,7 @@ export default function App() {
         id: `sess_${Date.now()}`,
         ownerUsername: currentUser.usernameKey,
         title: initData.title,
+        discipline: initData.discipline,
         sourceType: pendingScope.sourceType,
         sourceContent: pendingScope.sourceContent,
         selectedKbPaths: pendingScope.selectedKbPaths,
@@ -461,6 +486,31 @@ export default function App() {
     scheduleCloudDraftSave(currentUser.usernameKey, updated);
   };
 
+  const handleSelectConfidence = (
+    roundNumber: number,
+    questionId: string,
+    confidence: ConfidenceLevel
+  ) => {
+    if (!activeSession || !currentUser) return;
+    const updated: TrainingSession = {
+      ...activeSession,
+      rounds: activeSession.rounds.map((round) =>
+        round.roundNumber !== roundNumber
+          ? round
+          : {
+              ...round,
+              questions: round.questions.map((q) =>
+                q.id === questionId ? { ...q, confidence } : q
+              ),
+            }
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+
+    applyLocalOptimistic(updated);
+    scheduleCloudDraftSave(currentUser.usernameKey, updated);
+  };
+
   const handleSubmitRound = async () => {
     if (!activeSession || !currentUser) return;
     const activeRound = activeSession.rounds[activeSession.rounds.length - 1];
@@ -499,7 +549,10 @@ export default function App() {
             wp.concept.trim().toLowerCase() === normalizedConcept
         );
 
-        if (ev.verdict === 'correct') {
+        const isLuckyGuess = Boolean(ev.isLuckyGuess);
+        const triggersInSessionWeakPoint = ev.verdict !== 'correct' || isLuckyGuess;
+
+        if (!triggersInSessionWeakPoint) {
           if (existingIdx >= 0 && question.isRetest) {
             updatedWeakPoints[existingIdx] = {
               ...updatedWeakPoints[existingIdx],
@@ -550,6 +603,15 @@ export default function App() {
 
       applyLocalOptimistic(updated);
       await updateCloudSession(currentUser.usernameKey, updated);
+
+      // Sync weak points / lucky guesses / mastered concepts to cross-session discipline bank
+      await syncRoundWeakPointsToBank({
+        usernameKey: currentUser.usernameKey,
+        session: updated,
+        questions: activeRound.questions,
+        evaluations: evalResult.evaluations,
+        existingBank: weakPointsBank,
+      });
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Erro ao avaliar respostas.'
@@ -617,7 +679,7 @@ export default function App() {
     if (!activeRound) return;
 
     const roundErrorsCount = activeRound.evaluations.filter(
-      (e) => e.verdict !== 'correct'
+      (e) => e.verdict !== 'correct' || e.weakPointTriggered
     ).length;
     const unresolvedWeakPointsCount = activeSession.activeWeakPoints.filter(
       (wp) => !wp.resolved
@@ -723,6 +785,55 @@ export default function App() {
     setRoute('trainer');
   };
 
+  const handleStartWeakPointsTraining = (
+    discipline: string,
+    items: MergedWeakPointItem[]
+  ) => {
+    if (items.length === 0) return;
+    const summaryLines = items
+      .map(
+        (item, idx) =>
+          `${idx + 1}. ${item.concept}${item.definition ? ` — ${item.definition}` : ''}`
+      )
+      .join('\n');
+    const promptContent = `Disciplina: ${discipline}\nTreino sob demanda focado exclusivamente em consolidar os seguintes pontos fracos e acertos por chute registrados no banco do aluno:\n${summaryLines}`.slice(
+      0,
+      19000
+    );
+
+    setErrorMessage(null);
+    setActiveSessionId(null);
+    setPendingScope({
+      sourceType: 'weak_points',
+      sourceContent: promptContent,
+      selectedKbPaths: [],
+      disciplineHint: discipline,
+    });
+    setRoute('trainer');
+  };
+
+  const handleToggleWeakPointStatus = async (entry: MergedWeakPointItem) => {
+    if (!currentUser || entry.isLegacyFromSession) return;
+    try {
+      await toggleWeakPointStatus(currentUser.usernameKey, entry);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Erro ao atualizar status do ponto fraco.'
+      );
+    }
+  };
+
+  const handleDeleteWeakPoint = async (entry: MergedWeakPointItem) => {
+    if (!currentUser || entry.isLegacyFromSession) return;
+    try {
+      await deleteWeakPointBankEntry(currentUser.usernameKey, entry.id);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Erro ao excluir ponto fraco.'
+      );
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F6] dark:bg-[#111110] text-[#18181B] dark:text-[#F4F2ED] transition-colors">
       <TopBar
@@ -756,6 +867,17 @@ export default function App() {
             <Loader2 className="w-5 h-5 animate-spin text-[#B45309] dark:text-[#F59E0B]" aria-hidden="true" />
             <span>Carregando histórico de @{currentUser.usernameKey}...</span>
           </div>
+        ) : route === 'progress' ? (
+          <ProgressView
+            usernameKey={currentUser.usernameKey}
+            sessions={sessions}
+            weakPointsBank={weakPointsBank}
+            onStartWeakPointsTraining={handleStartWeakPointsTraining}
+            onToggleWeakPointStatus={handleToggleWeakPointStatus}
+            onDeleteWeakPoint={handleDeleteWeakPoint}
+            onOpenSession={handleResumeSession}
+            onStartNewTraining={handleStartNewTraining}
+          />
         ) : route === 'library' ? (
           <SynthesisLibraryView
             usernameKey={currentUser.usernameKey}
@@ -802,6 +924,7 @@ export default function App() {
             session={activeSession}
             onChangeAnswer={handleChangeAnswer}
             onSelectOption={handleSelectOption}
+            onSelectConfidence={handleSelectConfidence}
             onSubmitRound={handleSubmitRound}
             onAdvanceRound={handleAdvanceRound}
             onFinishEarly={() => handleFinalizeSession(activeSession)}

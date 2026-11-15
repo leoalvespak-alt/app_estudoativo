@@ -211,11 +211,13 @@ export function ScopeSetupView({
 
   if (pendingScope) {
     const scopeLabel =
-      pendingScope.sourceType === 'git_kb'
-        ? `Base Git (${pendingScope.selectedKbPaths.length} documento${pendingScope.selectedKbPaths.length === 1 ? '' : 's'})`
-        : pendingScope.sourceType === 'text'
-          ? 'Texto base'
-          : 'Tema livre · Busca automática na Base Git';
+      pendingScope.sourceType === 'weak_points'
+        ? 'Banco de Erros · Treino Sob Demanda'
+        : pendingScope.sourceType === 'git_kb'
+          ? `Base Git (${pendingScope.selectedKbPaths.length} documento${pendingScope.selectedKbPaths.length === 1 ? '' : 's'})`
+          : pendingScope.sourceType === 'text'
+            ? 'Texto base'
+            : 'Tema livre · Busca automática na Base Git';
 
     return (
       <section className="max-w-[920px] mx-auto px-4 sm:px-8 py-12">

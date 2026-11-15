@@ -1,8 +1,10 @@
-export type SourceType = 'topic' | 'text' | 'git_kb';
+export type SourceType = 'topic' | 'text' | 'git_kb' | 'weak_points';
 
 export type QuestionFormat = 'open' | 'multiple_choice';
 
 export type OptionLetter = 'A' | 'B' | 'C' | 'D' | 'E';
+
+export type ConfidenceLevel = 'certain' | 'unsure' | 'guess';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -80,6 +82,7 @@ export interface TrainerQuestion {
   options: QuestionOption[];
   userSelectedOption: OptionLetter | '';
   userAnswer: string;
+  confidence?: ConfidenceLevel | '';
 }
 
 export interface QuestionEvaluation {
@@ -90,6 +93,9 @@ export interface QuestionEvaluation {
   correctOption: OptionLetter | '';
   conceptDefinition: string;
   weakPointTriggered: boolean;
+  confidenceAtSubmit?: ConfidenceLevel | '';
+  isLuckyGuess?: boolean;
+  isConfidentError?: boolean;
 }
 
 export interface RoundRecord {
@@ -110,6 +116,30 @@ export interface WeakPoint {
   lastTestedRound: number;
   retestCount: number;
   resolved: boolean;
+}
+
+export type WeakPointTrigger =
+  | 'incorrect'
+  | 'partial'
+  | 'lucky_guess'
+  | 'unsure_hit';
+
+export interface WeakPointBankEntry {
+  id: string;
+  ownerUsername: string;
+  discipline: string;
+  concept: string;
+  definition: string;
+  subtopic: string;
+  sourceSessionId: string;
+  sourceSessionTitle: string;
+  status: 'active' | 'mastered';
+  lastTrigger: WeakPointTrigger;
+  errorCount: number;
+  guessCount: number;
+  retestSuccessCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StrategicDefinition {
@@ -139,6 +169,7 @@ export interface TrainingSession {
   id: string;
   ownerUsername: string;
   title: string;
+  discipline?: string;
   sourceType: SourceType;
   sourceContent: string;
   selectedKbPaths: string[];

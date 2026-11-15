@@ -53,9 +53,14 @@
           "minLength": 1,
           "maxLength": 160
         },
+        "discipline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
         "sourceType": {
           "type": "string",
-          "enum": ["topic", "text", "git_kb"]
+          "enum": ["topic", "text", "git_kb", "weak_points"]
         },
         "sourceContent": {
           "type": "string",
@@ -121,6 +126,95 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "WeakPointBankEntry": {
+      "title": "WeakPointBankEntry",
+      "description": "Registro persistente de ponto fraco ou acerto por chute agrupado por disciplina.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ownerUsername": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9._-]+$"
+        },
+        "discipline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "concept": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "definition": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "subtopic": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "sourceSessionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "sourceSessionTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "mastered"]
+        },
+        "lastTrigger": {
+          "type": "string",
+          "enum": ["incorrect", "partial", "lucky_guess", "unsure_hit"]
+        },
+        "errorCount": {
+          "type": "integer"
+        },
+        "guessCount": {
+          "type": "integer"
+        },
+        "retestSuccessCount": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUsername",
+        "discipline",
+        "concept",
+        "definition",
+        "subtopic",
+        "sourceSessionId",
+        "sourceSessionTitle",
+        "status",
+        "lastTrigger",
+        "errorCount",
+        "guessCount",
+        "retestSuccessCount",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -135,6 +229,12 @@
         "$ref": "#/entities/TrainingSession"
       },
       "description": "Historico e progresso em nuvem das sessoes de treino ativo isoladas por usuario."
+    },
+    "/users/{usernameKey}/weakPoints/{weakPointId}": {
+      "schema": {
+        "$ref": "#/entities/WeakPointBankEntry"
+      },
+      "description": "Banco de erros e acertos frageis agrupados por disciplina para reteste sob demanda."
     }
   }
 }

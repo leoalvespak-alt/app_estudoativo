@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react';
 
-export type AppRoute = 'trainer' | 'library' | 'history';
+export type AppRoute = 'trainer' | 'progress' | 'library' | 'history';
 
 interface TopBarProps {
   activeRoute: AppRoute;
@@ -26,7 +26,7 @@ export function TopBar({
           Caderno Ativo
         </button>
 
-        <nav aria-label="Navegação principal" className="flex items-center gap-6 sm:gap-8">
+        <nav aria-label="Navegação principal" className="flex items-center gap-5 sm:gap-8 overflow-x-auto">
           <button
             type="button"
             onClick={() => onNavigate('trainer')}
@@ -37,6 +37,18 @@ export function TopBar({
             }`}
           >
             {hasActiveSession ? 'Treino Atual' : 'Configurar Treino'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('progress')}
+            className={`text-sm font-medium whitespace-nowrap shrink-0 py-1 border-b-2 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#B45309] ${
+              activeRoute === 'progress'
+                ? 'border-[#B45309] dark:border-[#F59E0B] text-[#18181B] dark:text-[#F4F2ED]'
+                : 'border-transparent text-[#57534E] dark:text-[#A8A29E] hover:text-[#18181B] dark:hover:text-[#F4F2ED]'
+            }`}
+          >
+            Progresso
           </button>
 
           <button
